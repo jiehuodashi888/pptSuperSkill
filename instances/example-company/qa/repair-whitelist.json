@@ -1,0 +1,15 @@
+{
+  "status": "approved",
+  "whitelist": [
+    {
+      "action": "set-text-insets",
+      "rule_ref": "layout.text-insets",
+      "parameters": { "left": 0.1, "right": 0.1, "top": 0.1, "bottom": 0.1 }
+    },
+    {
+      "action": "set-paragraph-spacing",
+      "rule_ref": "typography.paragraph-spacing",
+      "parameters": { "before": 0, "after": 6 }
+    }
+  ]
+}
