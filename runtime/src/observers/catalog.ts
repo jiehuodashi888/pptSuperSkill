@@ -48,6 +48,7 @@ const FORBIDDEN_NESTED_FIELD_PARTS = [
   "adapter",
   "orchestration",
 ] as const;
+const SAFE_ARRAY_PROTOTYPE = createSafeArrayPrototype();
 
 export function createObservationTask(
   observerId: ObserverId,
@@ -59,11 +60,11 @@ export function createObservationTask(
   const isolatedInput = isolateInput(input);
   validateTaskInput(isolatedInput);
 
-  return Object.freeze({
+  return Object.freeze(Object.assign(Object.create(null) as AgentTask, {
     observerId,
     promptReference: `${PROMPT_ROOT}/${observerId}.md`,
     input: isolatedInput,
-  });
+  }));
 }
 
 function validateTaskInput(input: ObservationInput): void {
@@ -119,7 +120,7 @@ function isolateInput(input: ObservationInput): ObservationInput {
   const capabilities = descriptorValue(descriptors, "capabilities");
   const structuralFacts = descriptorValue(descriptors, "structuralFacts");
   const renderedAssets = descriptorValue(descriptors, "renderedAssets");
-  const isolated: ObservationInput = {
+  const isolated = Object.assign(Object.create(null) as ObservationInput, {
     companyId: companyId as string,
     level: level as ObservationLevel,
     sourceIds: sourceIds as readonly string[],
@@ -144,7 +145,7 @@ function isolateInput(input: ObservationInput): ObservationInput {
             "renderedAssets",
           ) as readonly string[],
         }),
-  };
+  });
 
   return Object.freeze(isolated);
 }
@@ -173,7 +174,7 @@ function cloneJsonValue(value: unknown, path: string): unknown {
     throw new Error(`${path} must contain only JSON values`);
   }
 
-  const clone: Record<string, unknown> = {};
+  const clone = Object.create(null) as Record<string, unknown>;
   const descriptors = getDataDescriptors(value, path);
   for (const key of Reflect.ownKeys(descriptors)) {
     if (typeof key !== "string") {
@@ -216,6 +217,7 @@ function cloneJsonArray(value: unknown[], path: string): readonly unknown[] {
   }
 
   const clone: unknown[] = [];
+  Object.setPrototypeOf(clone, SAFE_ARRAY_PROTOTYPE);
   for (let index = 0; index < length; index += 1) {
     const descriptor = descriptors[String(index)];
     if (descriptor === undefined) {
@@ -256,4 +258,15 @@ function descriptorValue(
   key: string,
 ): unknown {
   return descriptors[key]?.value;
+}
+
+function createSafeArrayPrototype(): object {
+  const prototype = Object.create(null) as object;
+  Object.defineProperties(
+    prototype,
+    Object.getOwnPropertyDescriptors(
+      Array.prototype,
+    ) as unknown as PropertyDescriptorMap,
+  );
+  return Object.freeze(prototype);
 }

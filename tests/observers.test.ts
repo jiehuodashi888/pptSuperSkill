@@ -48,7 +48,7 @@ test("observer catalog contains exactly the nine distinct contracts in execution
 test("observation tasks identify a local prompt contract without embedding a model adapter", () => {
   const task = createObservationTask("typography", input);
 
-  assert.deepEqual(task, {
+  assert.deepEqual(toPlainData(task), {
     observerId: "typography",
     promptReference:
       ".cursor/skills/enterprise-ppt-multistyle/references/observers/typography.md",
@@ -140,7 +140,7 @@ test("observation tasks retain an isolated immutable snapshot of caller input", 
   structuralFacts.slides[0]!.title = "Mutated";
   capabilities.imageAnalysis = true;
 
-  assert.deepEqual(task.input, {
+  assert.deepEqual(toPlainData(task.input), {
     companyId: "example-company",
     level: "slide",
     sourceIds: ["deck-001"],
@@ -158,6 +158,7 @@ test("observation tasks retain an isolated immutable snapshot of caller input", 
   assert.equal(Object.isFrozen(task.input), true);
   assert.equal(Object.isFrozen(task.input.sourceIds), true);
   assert.equal(Object.isFrozen(task.input.structuralFacts), true);
+  assert.equal(task.input.sourceIds.includes("deck-001"), true);
 });
 
 test("observation task construction rejects changing accessors without invoking them", () => {
@@ -205,6 +206,79 @@ test("observation task construction rejects changing accessors without invoking 
     /accessor|data field/i,
   );
   assert.equal(nestedAccessorReads, 0);
+});
+
+test("observation task snapshots are independent of mutable built-in prototypes", () => {
+  const structuralFacts: Record<string, unknown> = {
+    slides: [{ title: "Original" }],
+  };
+  Object.defineProperty(structuralFacts, "__proto__", {
+    value: { label: "own-data" },
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+  const task = createObservationTask("typography", {
+    ...input,
+    structuralFacts,
+  });
+  const objectProvider = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    "provider",
+  );
+  const objectExecute = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    "execute",
+  );
+  const arrayProvider = Object.getOwnPropertyDescriptor(
+    Array.prototype,
+    "provider",
+  );
+  const arrayRun = Object.getOwnPropertyDescriptor(Array.prototype, "run");
+
+  try {
+    Object.defineProperty(Object.prototype, "provider", {
+      value: "polluted-provider",
+      configurable: true,
+    });
+    Object.defineProperty(Object.prototype, "execute", {
+      value: () => "polluted-execution",
+      configurable: true,
+    });
+    Object.defineProperty(Array.prototype, "provider", {
+      value: "polluted-array-provider",
+      configurable: true,
+    });
+    Object.defineProperty(Array.prototype, "run", {
+      value: () => "polluted-array-execution",
+      configurable: true,
+    });
+
+    const taskRecord = task as unknown as Record<string, unknown>;
+    const inputRecord = task.input as unknown as Record<string, unknown>;
+    const facts = task.input.structuralFacts as Record<string, unknown>;
+    const slide = (facts.slides as Array<Record<string, unknown>>)[0]!;
+    const sources = task.input.sourceIds as unknown as Record<string, unknown>;
+
+    assert.equal(taskRecord.provider, undefined);
+    assert.equal(taskRecord.execute, undefined);
+    assert.equal(inputRecord.provider, undefined);
+    assert.equal(facts.provider, undefined);
+    assert.equal(slide.execute, undefined);
+    assert.equal(sources.provider, undefined);
+    assert.equal(sources.run, undefined);
+    assert.equal(Object.getPrototypeOf(task), null);
+    assert.equal(Object.getPrototypeOf(task.input), null);
+    assert.equal(Object.getPrototypeOf(facts), null);
+    assert.notEqual(Object.getPrototypeOf(task.input.sourceIds), Array.prototype);
+    assert.equal(Object.hasOwn(facts, "__proto__"), true);
+    assert.deepEqual(toPlainData(facts.__proto__), { label: "own-data" });
+  } finally {
+    restoreDescriptor(Object.prototype, "provider", objectProvider);
+    restoreDescriptor(Object.prototype, "execute", objectExecute);
+    restoreDescriptor(Array.prototype, "provider", arrayProvider);
+    restoreDescriptor(Array.prototype, "run", arrayRun);
+  }
 });
 
 test("normalization rejects a claimed fact without evidence", () => {
@@ -288,3 +362,19 @@ test("normalization rejects an observer result in another contract category", ()
   assert.equal(result.ok, false);
   assert.match(result.errors.join("\n"), /category/i);
 });
+
+function restoreDescriptor(
+  target: object,
+  key: string,
+  descriptor: PropertyDescriptor | undefined,
+): void {
+  if (descriptor === undefined) {
+    Reflect.deleteProperty(target, key);
+  } else {
+    Object.defineProperty(target, key, descriptor);
+  }
+}
+
+function toPlainData(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value)) as unknown;
+}
