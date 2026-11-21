@@ -176,6 +176,71 @@ test("missing write capability and unsupported adapters fail without native fall
   assert.deepEqual(await readdir(request.outputDirectory), []);
 });
 
+test("numeric token extremes are rejected before an output file is written", async (t) => {
+  for (const [field, values] of [
+    ["titleFontSize", [1e308, 0.001, 400.001]],
+    ["bodyFontSize", [1e308, 0.001]],
+    ["width", [1e308, 0.999, 56.001]],
+    ["height", [1e308, 0.999, 56.001]],
+  ] as const) {
+    for (const value of values) {
+      await t.test(`${field}=${value}`, async () => {
+        const request = await input();
+        await assert.rejects(new NativeCreateAdapter().generate({
+          ...request, pagePlan: {
+            ...plan(), tokens: { ...plan().tokens, [field]: value },
+            layouts: [{ id: "opening", status: "approved", title: { x: 0, y: 0, w: 0.1, h: 0.1 }, body: { x: 0, y: 0, w: 0.1, h: 0.1 } }],
+            slides: [plan().slides[0]],
+          },
+        }), /range|dimension|font/i);
+        assert.deepEqual(await readdir(request.outputDirectory), []);
+      });
+    }
+  }
+});
+
+test("layout numeric extremes and rounded overflow are rejected before writing", async (t) => {
+  const cases = [
+    { name: "tiny width", title: { x: 1, y: 1, w: 1e-12, h: 1 } },
+    { name: "tiny height", title: { x: 1, y: 1, w: 1, h: 1e-12 } },
+    { name: "huge width", title: { x: 0, y: 0, w: 1e308, h: 1 } },
+    { name: "huge coordinate", title: { x: 1e308, y: 0, w: 1, h: 1 } },
+    // Raw right edge equals the slide width; independent rounding adds one EMU.
+    { name: "rounded right edge", width: 10 + 0.2 / 914400, title: { x: 1 + 0.6 / 914400, y: 1, w: 9 - 0.4 / 914400, h: 1 } },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.name, async () => {
+      const request = await input();
+      const pagePlan = plan();
+      await assert.rejects(new NativeCreateAdapter().generate({
+        ...request, pagePlan: {
+          ...pagePlan, tokens: { ...pagePlan.tokens, width: entry.width ?? pagePlan.tokens.width },
+          layouts: [{ ...pagePlan.layouts[0], title: entry.title }, pagePlan.layouts[1]],
+        },
+      }), /layout|range|bounds/i);
+      assert.deepEqual(await readdir(request.outputDirectory), []);
+    });
+  }
+});
+
+test("supported numeric boundaries produce finite integer PPTX measurements", async () => {
+  const request = await input();
+  const result = await new NativeCreateAdapter().generate({
+    ...request, pagePlan: {
+      ...plan(), tokens: { ...plan().tokens, width: 56, height: 1, titleFontSize: 400, bodyFontSize: 1 },
+      layouts: [{ id: "opening", status: "approved", title: { x: 0, y: 0, w: 56, h: 1 }, body: { x: 0, y: 0, w: 1 / 914400, h: 1 / 914400 } }],
+      slides: [plan().slides[0]],
+    },
+  });
+  const zip = await JSZip.loadAsync(await readFile(result.outputPath));
+  assert.match(await zip.file("ppt/presentation.xml")!.async("string"), /cx="51206400" cy="914400"/);
+  const slide = await zip.file("ppt/slides/slide1.xml")!.async("string");
+  assert.match(slide, /sz="40000"/);
+  assert.match(slide, /sz="100"/);
+  assert.match(slide, /<a:ext cx="1" cy="1"/);
+  assert.doesNotMatch(slide, /NaN|Infinity/);
+});
+
 test("adapter dispatch preserves native generation", async () => {
   const request = await input();
   const result = await generatePresentation(request, [new NativeCreateAdapter()]);

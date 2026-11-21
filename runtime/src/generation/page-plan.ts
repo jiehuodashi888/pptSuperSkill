@@ -1,5 +1,12 @@
 import type { ApprovedRoute } from "../routing/router.js";
 
+const EMU_PER_INCH = 914400;
+// Supported subset: 1–56 inch slides, 1–400 pt text, and on-slide boxes
+// at least one EMU wide/high. Staying below 100 inches also avoids
+// PptxGenJS 3.x interpreting numeric layout values as preconverted EMUs.
+const MAX_INCHES = 56;
+const MAX_FONT_POINTS = 400;
+
 export interface LayoutBox {
   readonly x: number;
   readonly y: number;
@@ -51,8 +58,10 @@ export function validatePagePlan(plan: PagePlan, route: ApprovedRoute): void {
   if (!tokens || tokens.status !== "approved") {
     throw new Error("Page plan tokens must be approved");
   }
-  for (const value of [tokens.width, tokens.height, tokens.titleFontSize, tokens.bodyFontSize]) {
-    if (!Number.isFinite(value) || value <= 0) throw new Error("Invalid approved token dimension or font size");
+  const widthEmu = checkedMeasurement(tokens.width, 1, MAX_INCHES, EMU_PER_INCH, "slide width dimension");
+  const heightEmu = checkedMeasurement(tokens.height, 1, MAX_INCHES, EMU_PER_INCH, "slide height dimension");
+  for (const value of [tokens.titleFontSize, tokens.bodyFontSize]) {
+    checkedMeasurement(value, 1, MAX_FONT_POINTS, 100, "font size");
   }
   for (const color of [tokens.backgroundColor, tokens.titleColor, tokens.bodyColor]) {
     if (typeof color !== "string" || !/^[0-9A-Fa-f]{6}$/.test(color)) throw new Error("Invalid approved color token: expected six hex digits");
@@ -69,7 +78,12 @@ export function validatePagePlan(plan: PagePlan, route: ApprovedRoute): void {
     }
     layoutIds.add(layout.id);
     for (const box of [layout.title, layout.body]) {
-      if (!box || ![box.x, box.y, box.w, box.h].every(Number.isFinite) || box.x < 0 || box.y < 0 || box.w <= 0 || box.h <= 0 || box.x + box.w > tokens.width || box.y + box.h > tokens.height) {
+      if (!box) throw new Error("Approved layout box is required");
+      const x = checkedMeasurement(box.x, 0, MAX_INCHES, EMU_PER_INCH, "layout x");
+      const y = checkedMeasurement(box.y, 0, MAX_INCHES, EMU_PER_INCH, "layout y");
+      const w = checkedMeasurement(box.w, 1 / EMU_PER_INCH, MAX_INCHES, EMU_PER_INCH, "layout width");
+      const h = checkedMeasurement(box.h, 1 / EMU_PER_INCH, MAX_INCHES, EMU_PER_INCH, "layout height");
+      if (box.x + box.w > tokens.width || box.y + box.h > tokens.height || x + w > widthEmu || y + h > heightEmu) {
         throw new Error("Approved layout box exceeds slide bounds");
       }
     }
@@ -84,6 +98,15 @@ export function validatePagePlan(plan: PagePlan, route: ApprovedRoute): void {
       throw new Error("Slide text contains invalid XML characters");
     }
   }
+}
+
+/** Match the generator's integer conversions, checking input and output ranges. */
+function checkedMeasurement(value: number, min: number, max: number, scale: number, label: string): number {
+  const converted = Math.round(value * scale);
+  if (!Number.isFinite(value) || value < min || value > max || !Number.isSafeInteger(converted) || converted < Math.ceil(min * scale) || converted > Math.floor(max * scale)) {
+    throw new Error(`Approved ${label} is outside the supported numeric range`);
+  }
+  return converted;
 }
 
 function isXmlText(value: string): boolean {
