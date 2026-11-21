@@ -247,3 +247,94 @@ test("incomplete or malformed render coverage prevents analysis from running", a
     assert.equal(analyzed, false);
   }
 });
+
+test("repair planning rejects changing action and target accessors before invoking them", async () => {
+  const report = await auditDeck(input());
+  const policy = await examplePolicy();
+  for (const field of ["action", "target"] as const) {
+    const proposal = finding("changing-accessor");
+    let reads = 0;
+    Object.defineProperty(proposal.recommended_fix, field, {
+      enumerable: true,
+      get: () => {
+        reads++;
+        if (field === "action") return reads <= 2 ? "set-text-insets" : "rewrite-business-conclusion";
+        return reads <= 2 ? { slide_number: 1, element_ref: "body" } : { slide_number: -1, element_ref: "" };
+      },
+    });
+    assert.throws(() => applySafeRepairs({ ...report, findings: [proposal] }, policy), /accessor/i);
+    assert.equal(reads, 0);
+  }
+});
+
+test("repair planning routes malformed matching evidence and targets to approval", async () => {
+  const report = await auditDeck(input());
+  const policy = await examplePolicy();
+  for (const target of [
+    { slide_number: -1, element_ref: "body" },
+    { slide_number: 0, element_ref: "body" },
+    { slide_number: 1.5, element_ref: "body" },
+    { slide_number: 1, element_ref: "" },
+    { slide_number: 1, element_ref: " " },
+  ]) {
+    const proposal = finding("forged");
+    proposal.recommended_fix = { ...proposal.recommended_fix!, target };
+    proposal.evidence = [{ ...proposal.evidence[0]!, ...target }];
+    const plan = applySafeRepairs({ ...report, findings: [proposal] }, policy);
+    assert.equal(plan.actions.length, 0);
+    assert.equal(plan.approvalRequests[0]!.status, "pending");
+  }
+  const proposal = finding("invalid-source");
+  proposal.evidence[0]!.source_id = "";
+  const plan = applySafeRepairs({ ...report, findings: [proposal] }, policy);
+  assert.equal(plan.actions.length, 0);
+  assert.equal(plan.approvalRequests[0]!.status, "pending");
+});
+
+test("semantic fields on recommendations and targets require approval even when non-enumerable", async () => {
+  const report = await auditDeck(input());
+  const policy = await examplePolicy();
+  for (const level of ["recommendation", "target"] as const) {
+    for (const enumerable of [true, false]) {
+      const proposal = finding("extra-semantic-field");
+      const value = level === "recommendation" ? proposal.recommended_fix : proposal.recommended_fix!.target;
+      Object.defineProperty(value, "conclusion", { value: "Rewrite business conclusion", enumerable });
+      const plan = applySafeRepairs({ ...report, findings: [proposal] }, policy);
+      assert.equal(plan.actions.length, 0);
+      assert.equal(plan.approvalRequests[0]!.status, "pending");
+    }
+  }
+});
+
+test("planned mechanical repairs retain an immutable validated snapshot", async () => {
+  const proposal = finding("snapshot");
+  const report = { ...await auditDeck(input()), findings: [proposal] };
+  const plan = applySafeRepairs(report, await examplePolicy());
+  proposal.recommended_fix = { ...proposal.recommended_fix!, action: "rewrite-business-conclusion", target: { slide_number: -1, element_ref: "" } };
+  const action = plan.actions[0]!;
+  assert.equal(action.action, "set-text-insets");
+  assert.deepEqual(action.target, { slide_number: 1, element_ref: "body" });
+  assert.ok(Object.isFrozen(action));
+  assert.ok(Object.isFrozen(action.target));
+  assert.ok(Object.isFrozen(action.parameters));
+});
+
+test("partial or wrongly typed structural and visual adapter methods yield explicit gaps", async () => {
+  const request = input();
+  for (const structural of [{}, { inspect: null }, { inspect: "unavailable" }]) {
+    const report = await auditDeck({ ...request, structural } as unknown as AuditInput);
+    assert.equal(report.structural.status, "not-run");
+    assert.equal(report.status, "incomplete");
+    assert.match(report.coverage.gaps.join(" "), /structural.*adapter/i);
+  }
+  for (const visual of [
+    {}, { render: request.visual!.render }, { analyze: request.visual!.analyze },
+    { render: null, analyze: request.visual!.analyze },
+    { render: request.visual!.render, analyze: "unavailable" },
+  ]) {
+    const report = await auditDeck({ ...request, visual } as unknown as AuditInput);
+    assert.equal(report.visual.status, "not-run");
+    assert.equal(report.status, "incomplete");
+    assert.match(report.coverage.gaps.join(" "), /visual.*adapter/i);
+  }
+});

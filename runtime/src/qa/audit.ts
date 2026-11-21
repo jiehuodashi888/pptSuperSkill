@@ -63,9 +63,14 @@ export async function auditDeck(input: AuditInput): Promise<AuditReport> {
   }
   const capabilities = { ...input.capabilities };
   // Capture methods before async execution so later caller edits cannot switch adapters.
-  const inspect = input.structural?.inspect.bind(input.structural);
-  const render = input.visual?.render.bind(input.visual);
-  const analyze = input.visual?.analyze.bind(input.visual);
+  const structuralAdapter = input.structural;
+  const visualAdapter = input.visual;
+  const inspectMethod = structuralAdapter?.inspect;
+  const renderMethod = visualAdapter?.render;
+  const analyzeMethod = visualAdapter?.analyze;
+  const inspect = typeof inspectMethod === "function" ? inspectMethod.bind(structuralAdapter) : undefined;
+  const render = typeof renderMethod === "function" ? renderMethod.bind(visualAdapter) : undefined;
+  const analyze = typeof analyzeMethod === "function" ? analyzeMethod.bind(visualAdapter) : undefined;
   const structuralGaps: string[] = [];
   if (capabilities.pptxRead !== true) structuralGaps.push("Structural QA requires pptxRead capability");
   if (!inspect) structuralGaps.push("Structural QA adapter unavailable");
