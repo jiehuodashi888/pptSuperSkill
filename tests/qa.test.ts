@@ -338,3 +338,24 @@ test("partial or wrongly typed structural and visual adapter methods yield expli
     assert.match(report.coverage.gaps.join(" "), /visual.*adapter/i);
   }
 });
+
+test("audit aggregation preserves hidden semantic fields through the repair approval boundary", async () => {
+  const policy = await examplePolicy();
+  for (const phase of ["structural", "visual"] as const) {
+    for (const level of ["recommendation", "target"] as const) {
+      const proposal = finding(`${phase}-${level}-semantic-payload`);
+      const value = level === "recommendation" ? proposal.recommended_fix : proposal.recommended_fix!.target;
+      Object.defineProperty(value, "conclusion", { value: "Rewrite business conclusion", enumerable: false });
+      const request = input(phase === "structural" ? [proposal] : []);
+      const report = await auditDeck(phase === "structural" ? request : {
+        ...request,
+        visual: { ...request.visual!, analyze: async () => ({ findings: [proposal], checkedSlides: [1, 2] }) },
+      });
+      const plan = applySafeRepairs(report, policy);
+      assert.equal(plan.actions.length, 0);
+      assert.equal(plan.approvalRequests.length, 1);
+      assert.equal(plan.approvalRequests[0]!.status, "pending");
+      assert.equal(plan.approvalRequests[0]!.finding_id, proposal.finding_id);
+    }
+  }
+});

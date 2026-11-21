@@ -1,5 +1,6 @@
 import type { Evidence } from "../contracts/types.js";
 import type { AuditFinding, AuditReport } from "./audit.js";
+import { snapshotQaData } from "./snapshot.js";
 
 export type RepairChange = "mechanical" | "semantic-content" | "classification" | "data-meaning" | "route-selection" | "style-selection";
 
@@ -40,8 +41,8 @@ export interface RepairPlan {
 export function applySafeRepairs(report: AuditReport, policy: RepairPolicy): RepairPlan {
   // Snapshot before any validation. Accessors are rejected without executing code;
   // all emitted actions use the same frozen data that was checked below.
-  report = snapshotData(report);
-  policy = snapshotData(policy);
+  report = snapshotQaData(report);
+  policy = snapshotQaData(policy);
   const actions: RepairAction[] = [];
   const approvalRequests: RepairApprovalRequest[] = [];
   for (const finding of report.findings) {
@@ -93,27 +94,4 @@ function nonemptyText(value: unknown): value is string {
 
 function validEvidence(value: Evidence): boolean {
   return !!value && Number.isSafeInteger(value.slide_number) && value.slide_number > 0 && [value.source_id, value.element_ref, value.source_type, value.locator].every(nonemptyText);
-}
-
-/** Clone data descriptors without invoking getters, including non-enumerable fields
- * so exact-key validation cannot silently discard an unsupported semantic payload.
- */
-function snapshotData<T>(value: T, copies = new WeakMap<object, object>()): T {
-  if (typeof value === "function" || typeof value === "symbol") throw new TypeError("Repair inputs must contain only data");
-  if (value === null || typeof value !== "object") return value;
-  const existing = copies.get(value);
-  if (existing) return existing as T;
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null && prototype !== Array.prototype) throw new TypeError("Repair inputs must contain plain data objects");
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  const result = Array.isArray(value) ? new Array(descriptors.length!.value as number) : {};
-  copies.set(value, result);
-  for (const key of Reflect.ownKeys(descriptors)) {
-    if (typeof key !== "string") throw new TypeError("Repair inputs must contain string-keyed data");
-    if (Array.isArray(value) && key === "length") continue;
-    const descriptor = descriptors[key]!;
-    if (!("value" in descriptor)) throw new TypeError("Repair inputs must not contain accessors");
-    Object.defineProperty(result, key, { value: snapshotData(descriptor.value, copies), enumerable: true, configurable: false, writable: false });
-  }
-  return Object.freeze(result) as T;
 }

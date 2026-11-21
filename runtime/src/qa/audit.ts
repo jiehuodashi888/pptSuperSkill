@@ -1,6 +1,7 @@
 import type { CapabilityManifest, Evidence } from "../contracts/types.js";
 import { aggregateCoverage, slideCoverageGaps, type Coverage, type PhaseStatus } from "./coverage.js";
 import type { RepairRecommendation } from "./repair.js";
+import { snapshotQaData } from "./snapshot.js";
 
 export type Severity = "critical" | "error" | "warning" | "info";
 
@@ -106,7 +107,7 @@ export async function auditDeck(input: AuditInput): Promise<AuditReport> {
 async function runPhase(label: string, unavailable: string[], expected: number, run: () => Promise<CheckResult>): Promise<PhaseReport> {
   if (unavailable.length) return { status: "not-run", findings: [], gaps: unavailable };
   try {
-    const result = structuredClone(await run());
+    const result = snapshotQaData(await run());
     if (!result || !Array.isArray(result.findings) || (result.gaps !== undefined && (!Array.isArray(result.gaps) || result.gaps.some((gap) => typeof gap !== "string" || !gap.trim())))) {
       throw new Error("Adapter returned an invalid check result");
     }
