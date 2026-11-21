@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   OBSERVER_IDS,
   createObservationTask,
+  type ObservationInput,
   type ObserverId,
 } from "../runtime/src/observers/catalog.js";
 import { normalizeObservation } from "../runtime/src/observers/normalize.js";
@@ -79,6 +80,84 @@ test("observation task construction rejects unknown observers and unscoped input
       }),
     /sourceIds/i,
   );
+});
+
+test("observation task construction rejects provider and execution leakage at any depth", () => {
+  assert.throws(
+    () =>
+      createObservationTask("typography", {
+        ...input,
+        model: "provider-model",
+      } as ObservationInput),
+    /model/i,
+  );
+  assert.throws(
+    () =>
+      createObservationTask("typography", {
+        ...input,
+        structuralFacts: {
+          slides: [{ provider: "external-provider" }],
+        },
+      }),
+    /provider/i,
+  );
+  assert.throws(
+    () =>
+      createObservationTask("typography", {
+        ...input,
+        structuralFacts: {
+          slides: [{ inspect: () => "orchestrated" }],
+        },
+      }),
+    /function/i,
+  );
+});
+
+test("observation tasks retain an isolated immutable snapshot of caller input", () => {
+  const sourceIds = ["deck-001"];
+  const renderedAssets = ["slides/1.png"];
+  const structuralFacts = { slides: [{ title: "Original" }] };
+  const capabilities = {
+    pptxRead: true,
+    pptxWrite: false,
+    renderSlides: true,
+    imageAnalysis: false,
+    parallelAgents: false,
+  };
+  const mutableInput = {
+    companyId: "example-company",
+    level: "slide" as const,
+    sourceIds,
+    renderedAssets,
+    structuralFacts,
+    capabilities,
+  };
+
+  const task = createObservationTask("typography", mutableInput);
+  mutableInput.companyId = "other-company";
+  sourceIds[0] = "other-deck";
+  renderedAssets[0] = "other.png";
+  structuralFacts.slides[0]!.title = "Mutated";
+  capabilities.imageAnalysis = true;
+
+  assert.deepEqual(task.input, {
+    companyId: "example-company",
+    level: "slide",
+    sourceIds: ["deck-001"],
+    renderedAssets: ["slides/1.png"],
+    structuralFacts: { slides: [{ title: "Original" }] },
+    capabilities: {
+      pptxRead: true,
+      pptxWrite: false,
+      renderSlides: true,
+      imageAnalysis: false,
+      parallelAgents: false,
+    },
+  });
+  assert.equal(Object.isFrozen(task), true);
+  assert.equal(Object.isFrozen(task.input), true);
+  assert.equal(Object.isFrozen(task.input.sourceIds), true);
+  assert.equal(Object.isFrozen(task.input.structuralFacts), true);
 });
 
 test("normalization rejects a claimed fact without evidence", () => {
