@@ -1,0 +1,15 @@
+{
+  "dimension": "visual_style",
+  "entries": [
+    {
+      "id": "minimal",
+      "name": "Minimal",
+      "tags": ["spacious", "restrained-color"]
+    },
+    {
+      "id": "editorial",
+      "name": "Editorial",
+      "tags": ["high-contrast", "serif-accent"]
+    }
+  ]
+}

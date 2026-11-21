@@ -1,0 +1,15 @@
+{
+  "dimension": "layout_pattern",
+  "entries": [
+    {
+      "id": "title-and-content",
+      "name": "Title and Content",
+      "tags": ["single-focus"]
+    },
+    {
+      "id": "title-and-two-column",
+      "name": "Title and Two Column",
+      "tags": ["comparison", "parallel-content"]
+    }
+  ]
+}

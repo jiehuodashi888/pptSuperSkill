@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://enterprise-ppt-skill.local/schemas/style-profile.schema.json",
+  "title": "StyleProfile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile_id",
+    "business_type",
+    "visual_style",
+    "layout_pattern",
+    "tags"
+  ],
+  "properties": {
+    "profile_id": { "type": "string", "minLength": 1 },
+    "business_type": { "type": "string", "minLength": 1 },
+    "visual_style": { "type": "string", "minLength": 1 },
+    "layout_pattern": { "type": "string", "minLength": 1 },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

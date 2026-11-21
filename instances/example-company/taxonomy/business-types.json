@@ -1,0 +1,15 @@
+{
+  "dimension": "business_type",
+  "entries": [
+    {
+      "id": "quarterly-review",
+      "name": "Quarterly Review",
+      "tags": ["performance", "planning"]
+    },
+    {
+      "id": "project-update",
+      "name": "Project Update",
+      "tags": ["delivery", "status"]
+    }
+  ]
+}

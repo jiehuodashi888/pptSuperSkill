@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://enterprise-ppt-skill.local/schemas/approval.schema.json",
+  "title": "ApprovalRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["request_id", "status", "change", "evidence", "proposed_by"],
+  "properties": {
+    "request_id": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["candidate", "approved", "rejected"] },
+    "change": { "$ref": "#/$defs/change" },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/evidence" }
+    },
+    "proposed_by": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "tags"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "slide_number",
+        "element_ref",
+        "source_type",
+        "locator"
+      ],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "slide_number": { "type": "integer", "minimum": 1 },
+        "element_ref": { "type": "string", "minLength": 1 },
+        "source_type": { "type": "string", "minLength": 1 },
+        "locator": { "type": "string", "minLength": 1 }
+      }
+    },
+    "baseChange": {
+      "type": "object",
+      "required": ["action", "dimension"],
+      "properties": {
+        "action": { "type": "string" },
+        "dimension": {
+          "enum": ["business_type", "visual_style", "layout_pattern"]
+        }
+      }
+    },
+    "change": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "dimension", "candidate"],
+          "properties": {
+            "action": { "const": "publish" },
+            "dimension": {
+              "enum": ["business_type", "visual_style", "layout_pattern"]
+            },
+            "candidate": { "$ref": "#/$defs/entry" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "dimension", "entry_id", "new_name"],
+          "properties": {
+            "action": { "const": "rename" },
+            "dimension": {
+              "enum": ["business_type", "visual_style", "layout_pattern"]
+            },
+            "entry_id": { "type": "string", "minLength": 1 },
+            "new_name": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "dimension", "source_ids", "result"],
+          "properties": {
+            "action": { "const": "merge" },
+            "dimension": {
+              "enum": ["business_type", "visual_style", "layout_pattern"]
+            },
+            "source_ids": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "result": { "$ref": "#/$defs/entry" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "dimension", "source_id", "entries"],
+          "properties": {
+            "action": { "const": "split" },
+            "dimension": {
+              "enum": ["business_type", "visual_style", "layout_pattern"]
+            },
+            "source_id": { "type": "string", "minLength": 1 },
+            "entries": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "$ref": "#/$defs/entry" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["action", "dimension", "entry_id"],
+          "properties": {
+            "action": { "const": "deprecate" },
+            "dimension": {
+              "enum": ["business_type", "visual_style", "layout_pattern"]
+            },
+            "entry_id": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  }
+}
