@@ -160,6 +160,53 @@ test("observation tasks retain an isolated immutable snapshot of caller input", 
   assert.equal(Object.isFrozen(task.input.structuralFacts), true);
 });
 
+test("observation task construction rejects changing accessors without invoking them", () => {
+  let accessorReads = 0;
+  const accessorInput = {
+    companyId: "example-company",
+    level: "slide" as const,
+  } as ObservationInput;
+  Object.defineProperty(accessorInput, "sourceIds", {
+    enumerable: true,
+    get() {
+      accessorReads += 1;
+      return accessorReads < 4
+        ? ["deck-001"]
+        : ["deck-001", () => "provider-execution"];
+    },
+  });
+
+  assert.throws(
+    () => createObservationTask("typography", accessorInput),
+    /accessor|data field/i,
+  );
+  assert.equal(accessorReads, 0);
+
+  let nestedAccessorReads = 0;
+  const slides: unknown[] = [];
+  Object.defineProperty(slides, 0, {
+    enumerable: true,
+    configurable: true,
+    get() {
+      nestedAccessorReads += 1;
+      return nestedAccessorReads === 1
+        ? { title: "Benign" }
+        : { provider: "external", execute: () => "leaked" };
+    },
+  });
+  slides.length = 1;
+
+  assert.throws(
+    () =>
+      createObservationTask("typography", {
+        ...input,
+        structuralFacts: { slides },
+      }),
+    /accessor|data field/i,
+  );
+  assert.equal(nestedAccessorReads, 0);
+});
+
 test("normalization rejects a claimed fact without evidence", () => {
   const result = normalizeObservation(
     {

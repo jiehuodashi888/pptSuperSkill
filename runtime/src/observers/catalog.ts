@@ -53,8 +53,11 @@ export function createObservationTask(
   observerId: ObserverId,
   input: ObservationInput,
 ): AgentTask {
-  validateTaskInput(observerId, input);
+  if (!(OBSERVER_IDS as readonly string[]).includes(observerId)) {
+    throw new Error(`Unknown observer: ${observerId}`);
+  }
   const isolatedInput = isolateInput(input);
+  validateTaskInput(isolatedInput);
 
   return Object.freeze({
     observerId,
@@ -63,21 +66,7 @@ export function createObservationTask(
   });
 }
 
-function validateTaskInput(
-  observerId: ObserverId,
-  input: ObservationInput,
-): void {
-  if (!(OBSERVER_IDS as readonly string[]).includes(observerId)) {
-    throw new Error(`Unknown observer: ${observerId}`);
-  }
-  if (!isPlainObject(input)) {
-    throw new Error("Observation input must be a plain object");
-  }
-  for (const key of Reflect.ownKeys(input)) {
-    if (typeof key !== "string" || !INPUT_FIELDS.has(key)) {
-      throw new Error(`Observation input contains unsupported field: ${String(key)}`);
-    }
-  }
+function validateTaskInput(input: ObservationInput): void {
   if (typeof input.companyId !== "string" || input.companyId.trim() === "") {
     throw new Error("Observation input requires a non-empty companyId");
   }
@@ -108,49 +97,56 @@ function validateTaskInput(
   ) {
     throw new Error("Observation input contains an invalid capability manifest");
   }
-  if (input.structuralFacts !== undefined) {
-    validateJsonValue(input.structuralFacts, "structuralFacts");
-  }
 }
 
 function isolateInput(input: ObservationInput): ObservationInput {
+  if (!isPlainObject(input)) {
+    throw new Error("Observation input must be a plain object");
+  }
+  const descriptors = getDataDescriptors(input, "Observation input");
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (typeof key !== "string" || !INPUT_FIELDS.has(key)) {
+      throw new Error(`Observation input contains unsupported field: ${String(key)}`);
+    }
+  }
+
+  const companyId = descriptorValue(descriptors, "companyId");
+  const level = descriptorValue(descriptors, "level");
+  const sourceIds = cloneJsonValue(
+    descriptorValue(descriptors, "sourceIds"),
+    "sourceIds",
+  );
+  const capabilities = descriptorValue(descriptors, "capabilities");
+  const structuralFacts = descriptorValue(descriptors, "structuralFacts");
+  const renderedAssets = descriptorValue(descriptors, "renderedAssets");
   const isolated: ObservationInput = {
-    companyId: input.companyId,
-    level: input.level,
-    sourceIds: Object.freeze([...input.sourceIds]),
-    ...(input.capabilities === undefined
-      ? {}
-      : { capabilities: cloneCapabilities(input.capabilities) }),
-    ...(input.structuralFacts === undefined
+    companyId: companyId as string,
+    level: level as ObservationLevel,
+    sourceIds: sourceIds as readonly string[],
+    ...(capabilities === undefined
       ? {}
       : {
-          structuralFacts: cloneJsonValue(
-            input.structuralFacts,
-            "structuralFacts",
-          ),
+          capabilities: cloneJsonValue(
+            capabilities,
+            "capabilities",
+          ) as CapabilityManifest,
         }),
-    ...(input.renderedAssets === undefined
+    ...(structuralFacts === undefined
       ? {}
-      : { renderedAssets: Object.freeze([...input.renderedAssets]) }),
+      : {
+          structuralFacts: cloneJsonValue(structuralFacts, "structuralFacts"),
+        }),
+    ...(renderedAssets === undefined
+      ? {}
+      : {
+          renderedAssets: cloneJsonValue(
+            renderedAssets,
+            "renderedAssets",
+          ) as readonly string[],
+        }),
   };
 
   return Object.freeze(isolated);
-}
-
-function cloneCapabilities(
-  capabilities: CapabilityManifest,
-): CapabilityManifest {
-  return Object.freeze({
-    pptxRead: capabilities.pptxRead,
-    pptxWrite: capabilities.pptxWrite,
-    renderSlides: capabilities.renderSlides,
-    imageAnalysis: capabilities.imageAnalysis,
-    parallelAgents: capabilities.parallelAgents,
-  });
-}
-
-function validateJsonValue(value: unknown, path: string): void {
-  cloneJsonValue(value, path);
 }
 
 function cloneJsonValue(value: unknown, path: string): unknown {
@@ -171,16 +167,15 @@ function cloneJsonValue(value: unknown, path: string): unknown {
     throw new Error(`${path} must not contain a function`);
   }
   if (Array.isArray(value)) {
-    return Object.freeze(
-      value.map((item, index) => cloneJsonValue(item, `${path}[${index}]`)),
-    );
+    return cloneJsonArray(value, path);
   }
   if (!isPlainObject(value)) {
     throw new Error(`${path} must contain only JSON values`);
   }
 
   const clone: Record<string, unknown> = {};
-  for (const key of Reflect.ownKeys(value)) {
+  const descriptors = getDataDescriptors(value, path);
+  for (const key of Reflect.ownKeys(descriptors)) {
     if (typeof key !== "string") {
       throw new Error(`${path} must not contain symbol fields`);
     }
@@ -195,13 +190,39 @@ function cloneJsonValue(value: unknown, path: string): unknown {
     if (prohibited !== undefined) {
       throw new Error(`${path}.${key} contains prohibited ${prohibited} data`);
     }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !("value" in descriptor)) {
-      throw new Error(`${path}.${key} must be a data field`);
-    }
-    clone[key] = cloneJsonValue(descriptor.value, `${path}.${key}`);
+    clone[key] = cloneJsonValue(descriptors[key]!.value, `${path}.${key}`);
   }
 
+  return Object.freeze(clone);
+}
+
+function cloneJsonArray(value: unknown[], path: string): readonly unknown[] {
+  const descriptors = getDataDescriptors(value, path);
+  const length = descriptors.length?.value;
+  if (!Number.isSafeInteger(length) || length < 0) {
+    throw new Error(`${path} has an invalid array length`);
+  }
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (key === "length") {
+      continue;
+    }
+    if (
+      typeof key !== "string" ||
+      !/^(0|[1-9]\d*)$/.test(key) ||
+      Number(key) >= length
+    ) {
+      throw new Error(`${path} contains unsupported array field: ${String(key)}`);
+    }
+  }
+
+  const clone: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = descriptors[String(index)];
+    if (descriptor === undefined) {
+      throw new Error(`${path} must not contain sparse array entries`);
+    }
+    clone.push(cloneJsonValue(descriptor.value, `${path}[${index}]`));
+  }
   return Object.freeze(clone);
 }
 
@@ -211,4 +232,28 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   }
   const prototype = Object.getPrototypeOf(value) as unknown;
   return prototype === Object.prototype || prototype === null;
+}
+
+function getDataDescriptors(
+  value: object,
+  path: string,
+): Record<PropertyKey, PropertyDescriptor> {
+  const descriptors = Object.getOwnPropertyDescriptors(value) as Record<
+    PropertyKey,
+    PropertyDescriptor
+  >;
+  for (const key of Reflect.ownKeys(descriptors)) {
+    const descriptor = descriptors[key]!;
+    if (!("value" in descriptor)) {
+      throw new Error(`${path}.${String(key)} must be a data field, not an accessor`);
+    }
+  }
+  return descriptors;
+}
+
+function descriptorValue(
+  descriptors: Record<PropertyKey, PropertyDescriptor>,
+  key: string,
+): unknown {
+  return descriptors[key]?.value;
 }
