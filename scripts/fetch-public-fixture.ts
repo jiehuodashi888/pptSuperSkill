@@ -82,7 +82,7 @@ function validateConsent(url: string, confirm: boolean): void {
   if (confirm !== true) throw new Error("Explicit --confirm is required to acquire a public fixture");
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new Error("Fixture URL must be valid HTTP(S)"); }
-  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash || url !== url.trim()) throw new Error("Fixture URL must be HTTP(S), without credentials or fragments");
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password || url.includes("#") || url !== url.trim()) throw new Error("Fixture URL must be HTTP(S), without credentials or fragments");
 }
 
 async function rejectLinks(directory: string): Promise<void> {

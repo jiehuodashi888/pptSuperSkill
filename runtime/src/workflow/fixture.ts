@@ -53,7 +53,7 @@ export async function runFixtureWorkflow(options: FixtureWorkflowOptions): Promi
   const qa = { structural: options.qa?.structural, visual: options.qa?.visual };
   const validation = validateContract("capability-manifest", capabilities);
   if (!validation.ok) throw new Error(`Invalid capabilities: ${validation.errors.join("; ")}`);
-  if (!isAbsolute(fixturePath)) throw new Error("Fixture path must be an explicit local absolute path");
+  if (!isLocalFixturePath(fixturePath)) throw new Error("Fixture path must be an explicit local absolute path");
   const store = await openInstance(instancesRoot, companyId);
   for (const asset of store.manifest.assets) store.resolve(asset);
   const fixture = JSON.parse(await readFile(fixturePath, "utf8")) as LocalWorkflowFixture;
@@ -67,4 +67,14 @@ export async function runFixtureWorkflow(options: FixtureWorkflowOptions): Promi
   const generated = await generatePresentation({ mode: "native-create", route, pagePlan: fixture.pagePlan, capabilities, outputDirectory, fileName }, [new NativeCreateAdapter()]);
   const audit = await auditDeck({ deckPath: generated.outputPath, expectedSlideCount: generated.slideCount, capabilities, ...qa });
   return { companyId, classification: "test-only", capabilities, observationRun, observationAudit, routing, generatedDeck: { ...generated, status: "created" }, audit: { ...audit, complete: audit.coverage.complete } };
+}
+
+/** Classify before any I/O: Windows absolute paths also include remote shares,
+ * rooted current-drive paths and device namespaces, none of which is accepted.
+ */
+function isLocalFixturePath(path: string): boolean {
+  if (typeof path !== "string" || !isAbsolute(path) || /^[/\\]{2}/.test(path) || path.includes("\0")) return false;
+  if (process.platform !== "win32") return true;
+  if (!/^[a-z]:[/\\]/i.test(path) || /[:<>"|?*\x00-\x1f]/.test(path.slice(2))) return false;
+  return !path.slice(3).split(/[/\\]/).some((segment) => /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment));
 }

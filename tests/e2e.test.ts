@@ -70,6 +70,35 @@ test("fixture workflow stops ambiguous routing before writing a deck", async () 
   await assert.rejects(readFile(join(input.outputDirectory, input.fileName)), /ENOENT/);
 });
 
+test("fixture paths reject network and Windows device syntax before any filesystem lookup", async () => {
+  const input = await options();
+  // A deliberately absent LOCAL instance stops the old implementation before
+  // it could touch a network fixture path. Validation must instead fail first.
+  const instancesRoot = join(input.instancesRoot, "absent-local-instances");
+  const paths = [
+    "\\\\server.invalid\\share\\fixture.json", "//server.invalid/share/fixture.json",
+    "\\\\?\\C:\\fixture.json", "\\\\?\\UNC\\server.invalid\\share\\fixture.json",
+    "\\\\.\\pipe\\fixture", "//./pipe/fixture", "\\??\\C:\\fixture.json",
+    ...(process.platform === "win32" ? ["\\fixture.json", "/fixture.json", "C:fixture.json", "C:\\fixture.json:stream", "C:\\NUL.json"] : []),
+  ];
+  for (const fixturePath of paths) {
+    await assert.rejects(runFixtureWorkflow({ ...input, instancesRoot, fixturePath }), /fixture path.*local absolute/i, fixturePath);
+  }
+});
+
+test("structural errors preserve failed audit status while visual coverage remains incomplete", async () => {
+  const input = await options();
+  const report = await runFixtureWorkflow({ ...input, qa: { structural: { async inspect() {
+    return { checkedSlides: [1], findings: [{ finding_id: "structural-error", severity: "error", rule_ref: "fixture-rule", repairability: "none", recommended_fix: null,
+      evidence: [{ source_id: "synthetic-fixture", slide_number: 1, element_ref: "title", source_type: "synthetic-test", locator: "ppt/slides/slide1.xml#title" }] }] };
+  } } } });
+  assert.equal(report.audit.status, "failed");
+  assert.equal(report.audit.structural.status, "failed");
+  assert.equal(report.audit.complete, false);
+  assert.equal(report.audit.visual.status, "not-run");
+  assert.match(report.audit.coverage.gaps.join("\n"), /imageAnalysis/);
+});
+
 function cli(...args: string[]) {
   return spawnSync(process.execPath, ["--import", "tsx", "runtime/src/index.ts", ...args], { encoding: "utf8" });
 }
@@ -140,4 +169,13 @@ test("fixture acquisition refuses redirects and failed HTTP responses without pu
     await assert.rejects(fetchPublicFixture(base, async () => new Response("bad", { status })), /HTTP|redirect/i);
   }
   assert.deepEqual(await readdir(join(base.instanceDirectory, "tests", "public-fixtures")), []);
+});
+
+test("fixture acquisition rejects literal fragment delimiters including empty fragments", async () => {
+  const input = await options();
+  for (const url of ["https://example.invalid/f#", "https://example.invalid/f#part"]) {
+    await assert.rejects(fetchPublicFixture({ instanceDirectory: join(input.instancesRoot, input.companyId), url, confirm: true, name: "fragment", purpose: "test", licenseUseNote: "synthetic" }, async () => {
+      assert.fail("Fragment URL reached transport");
+    }), /without credentials or fragments/i);
+  }
 });

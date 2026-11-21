@@ -41,7 +41,7 @@ Resolve the selected approved tokens and layouts into a `PagePlan`. Pass the aut
 
 Run `auditDeck` on the actual generated deck with the expected slide count. A structural adapter must inspect deck bytes; validating only the page plan is insufficient. Visual QA needs both rendered slides and image analysis, including full slide coverage and explicit unsupported-rule gaps. No findings does not mean a complete audit. Deliver phase statuses, severity, evidence, coverage and outstanding gaps alongside the PPTX.
 
-With no renderer/image adapter, report `status: "incomplete"` and the `renderSlides`/`imageAnalysis` gaps. Do not claim visual approval or fabricate screenshots. A check can also fail with complete coverage: `coverage.complete` is not the pass/fail result.
+Preserve the returned `audit.status`. With no renderer/image adapter, report incomplete visual coverage and the `renderSlides`/`imageAnalysis` gaps separately. Structural error or critical findings keep the overall status `failed`, even while visual coverage is incomplete; never change that failure to `incomplete`. Without failing findings, missing coverage yields `incomplete`. Do not claim visual approval or fabricate screenshots. A check can also fail with complete coverage: `coverage.complete` is not the pass/fail result.
 
 `applySafeRepairs` only produces a repair plan. Its automatic actions must exactly match an approved whitelist and are limited to supported mechanical text insets or paragraph spacing. Content, numbers, data meaning, classification, route and style changes require review. An execution adapter and a fresh audit are needed after actual document edits; the core does not execute the repair plan.
 
