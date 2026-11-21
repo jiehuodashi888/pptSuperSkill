@@ -197,6 +197,12 @@ function validateRequestScope(request: ObservationRequest): void {
   if (request.level !== "slide" && request.slideSelector !== undefined) {
     throw new Error("slideSelector is only valid for slide observation");
   }
+  if (request.slideSelector !== undefined) {
+    const parsed = parseLocator(request.slideSelector.locatorPrefix, false);
+    if (!parsed.ok) {
+      throw new Error(`Invalid slide selector locator: ${parsed.error}`);
+    }
+  }
 }
 
 function evidenceScopeErrors(
@@ -216,14 +222,67 @@ function evidenceScopeErrors(
           `evidence slide ${evidence.slide_number} does not match slide selector ${selector.slideNumber}`,
         );
       }
-      if (!evidence.locator.startsWith(selector.locatorPrefix)) {
+      const expected = parseLocator(selector.locatorPrefix, false);
+      const actual = parseLocator(evidence.locator, true);
+      if (!actual.ok) {
+        errors.push(`evidence locator is invalid: ${actual.error}`);
+      } else if (!expected.ok || actual.document !== expected.document) {
         errors.push(
-          `evidence locator ${evidence.locator} does not match slide selector prefix ${selector.locatorPrefix}`,
+          `evidence document locator ${actual.document} does not exactly match slide selector ${selector.locatorPrefix}`,
         );
       }
     }
   }
   return errors;
+}
+
+type ParsedLocator =
+  | { readonly ok: true; readonly document: string }
+  | { readonly ok: false; readonly error: string };
+
+function parseLocator(locator: string, allowFragment: boolean): ParsedLocator {
+  if (locator.trim() !== locator || locator === "") {
+    return { ok: false, error: "locator must be non-empty without surrounding whitespace" };
+  }
+  if (/[/\\]$/.test(locator) || locator.includes("\\") || locator.includes("?")) {
+    return { ok: false, error: "locator contains an ambiguous path boundary" };
+  }
+  const hash = locator.indexOf("#");
+  if (hash !== -1 && locator.indexOf("#", hash + 1) !== -1) {
+    return { ok: false, error: "locator contains multiple fragment boundaries" };
+  }
+  if (!allowFragment && hash !== -1) {
+    return { ok: false, error: "selector locator must identify a document without a fragment" };
+  }
+  const document = hash === -1 ? locator : locator.slice(0, hash);
+  const fragment = hash === -1 ? undefined : locator.slice(hash + 1);
+  if (fragment !== undefined && (fragment === "" || /[\u0000-\u001f]/.test(fragment))) {
+    return { ok: false, error: "locator has an invalid fragment boundary" };
+  }
+  const segments = document.split("/");
+  if (segments.some((segment) => segment === "")) {
+    return { ok: false, error: "locator contains ambiguous empty path segments" };
+  }
+  const canonical: string[] = [];
+  for (const segment of segments) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      return { ok: false, error: "locator contains invalid percent encoding" };
+    }
+    if (
+      decoded === "." || decoded === ".." ||
+      decoded.includes("/") || decoded.includes("\\")
+    ) {
+      return { ok: false, error: "locator contains traversal or ambiguous path segments" };
+    }
+    if (/[\u0000-\u001f]/.test(decoded)) {
+      return { ok: false, error: "locator contains control characters" };
+    }
+    canonical.push(decoded);
+  }
+  return { ok: true, document: canonical.join("/") };
 }
 
 function normalizationContext(task: AgentTask) {
@@ -251,8 +310,34 @@ interface OutputEnvelope {
 }
 
 function outputEnvelope(raw: unknown): OutputEnvelope {
-  if (!isRecord(raw) || !("observations" in raw)) {
+  if (!isRecord(raw)) {
     return { observations: [raw], rules: [], classifications: [], errors: [] };
+  }
+  const hasObservations = Object.hasOwn(raw, "observations");
+  const hasRules = Object.hasOwn(raw, "rules");
+  const hasClassifications = Object.hasOwn(raw, "classifications");
+  const shorthandErrors: string[] = [];
+  if (hasRules && !Array.isArray(raw.rules)) {
+    shorthandErrors.push("Observer output rules must be an array");
+  }
+  if (hasClassifications && !Array.isArray(raw.classifications)) {
+    shorthandErrors.push("Observer output classifications must be an array");
+  }
+  if (!hasObservations) {
+    if (
+      (hasRules && Array.isArray(raw.rules)) ||
+      (hasClassifications && Array.isArray(raw.classifications))
+    ) {
+      shorthandErrors.push(
+        "Observer proposal fields require an observations array envelope",
+      );
+    }
+    return {
+      observations: [raw],
+      rules: [],
+      classifications: [],
+      errors: shorthandErrors,
+    };
   }
   const observations = Array.isArray(raw.observations) ? raw.observations : [];
   const errors = Array.isArray(raw.observations)
@@ -267,11 +352,11 @@ function outputEnvelope(raw: unknown): OutputEnvelope {
   const classifications = Array.isArray(raw.classifications)
     ? raw.classifications.filter(isClassificationProposal)
     : [];
-  if (Object.hasOwn(raw, "rules") && !Array.isArray(raw.rules)) {
+  if (hasRules && !Array.isArray(raw.rules)) {
     errors.push("Observer output rules must be an array");
   }
   if (
-    Object.hasOwn(raw, "classifications") &&
+    hasClassifications &&
     !Array.isArray(raw.classifications)
   ) {
     errors.push("Observer output classifications must be an array");

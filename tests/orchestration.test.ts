@@ -377,16 +377,16 @@ test("final audit rejects missing, duplicate, and unexpected observer results", 
   const audit = auditRun(malformed);
 
   assert.equal(audit.complete, false);
-  assert.deepEqual(
-    audit.unresolved
-      .filter(({ type }) => type === "catalog-integrity")
-      .map(({ message }) => message),
-    [
-      "Missing observer result: content",
-      "Duplicate observer result: typography",
-      "Unexpected observer result: unexpected-observer",
-    ],
-  );
+  const integrityMessages = audit.unresolved
+    .filter(({ type }) => type === "catalog-integrity")
+    .map(({ message }) => message);
+  for (const expected of [
+    "Missing observer result: content",
+    "Duplicate observer result: typography",
+    "Unexpected observer result: unexpected-observer",
+  ]) {
+    assert.equal(integrityMessages.includes(expected), true);
+  }
 });
 
 test("final audit never completes an empty partial run", () => {
@@ -453,6 +453,155 @@ test("final audit detects conflicting payloads that reuse observation and rule i
       `Conflicting payloads reuse observation_id ${duplicateObservationId}`,
       `Conflicting payloads reuse rule_id ${duplicateRuleId}`,
     ],
+  );
+});
+
+test("slide locators reject path-prefix confusion, traversal, and ambiguous segments", async () => {
+  const slideRequest: ObservationRequest = {
+    ...request,
+    level: "slide",
+    slideSelector: {
+      slideNumber: 2,
+      locatorPrefix: "deck-001/slide2.xml",
+    },
+  };
+  const invalidLocators = [
+    "deck-001/slide2.xml.evil#shape-1",
+    "deck-001/slide2.xml/../other.xml#shape-1",
+    "deck-001/slide2.xml//shape-1",
+  ];
+  let callIndex = 0;
+  const adapter: ModelAdapter = {
+    async run(task) {
+      const locator = invalidLocators[callIndex % invalidLocators.length]!;
+      callIndex += 1;
+      return {
+        ...rawObservation(task, 0.9),
+        evidence: [{
+          ...evidence("deck-001"),
+          slide_number: 2,
+          locator,
+        }],
+      };
+    },
+  };
+
+  const run = await observeDeck(slideRequest, adapter);
+
+  assert.equal(run.results.every((result) => !result.ok), true);
+  assert.match(
+    run.results.flatMap((result) => result.ok ? [] : result.errors).join("\n"),
+    /document locator|traversal|ambiguous/i,
+  );
+});
+
+test("slide selectors reject traversal before invoking the adapter", async () => {
+  const adapter = new RecordingAdapter();
+
+  await assert.rejects(
+    observeDeck({
+      ...request,
+      level: "slide",
+      slideSelector: {
+        slideNumber: 2,
+        locatorPrefix: "deck-001/slides/../slide2.xml",
+      },
+    }, adapter),
+    /locator|traversal|ambiguous/i,
+  );
+  assert.equal(adapter.calls.length, 0);
+});
+
+test("final audit rejects catalog slots whose observations belong to another observer", () => {
+  const sharedObservation = normalizedObservation(
+    "typography",
+    "Copied typography result",
+    0.9,
+  );
+  const run: ObservationRun = {
+    ...manualRun({ results: [] }),
+    results: OBSERVER_IDS.map((observerId) => ({
+      observerId,
+      ok: true,
+      observations: [sharedObservation],
+      rules: [],
+      classifications: [],
+    })),
+  };
+
+  const audit = auditRun(run);
+
+  assert.equal(audit.complete, false);
+  assert.equal(
+    audit.unresolved.filter(({ message }) => /does not belong to observer/i.test(message)).length,
+    OBSERVER_IDS.length - 1,
+  );
+});
+
+test("final audit rejects successful catalog slots without evidence-backed observations", () => {
+  const run: ObservationRun = {
+    ...manualRun({ results: [] }),
+    results: OBSERVER_IDS.map((observerId) => ({
+      observerId,
+      ok: true,
+      observations: [],
+      rules: [],
+      classifications: [],
+    })),
+  };
+
+  const audit = auditRun(run);
+
+  assert.equal(audit.complete, false);
+  assert.equal(
+    audit.unresolved.filter(({ message }) => /evidence-backed observation/i.test(message)).length,
+    OBSERVER_IDS.length,
+  );
+});
+
+test("final audit rejects a successful observation whose evidence is empty", () => {
+  const complete = manualRun({ results: [] });
+  const run: ObservationRun = {
+    ...complete,
+    results: complete.results.map((result) =>
+      result.observerId === "typography"
+        ? {
+            ...result,
+            observations: result.observations.map((observation) => ({
+              ...observation,
+              evidence: [],
+            })),
+          }
+        : result
+    ),
+  };
+
+  const audit = auditRun(run);
+
+  assert.equal(audit.complete, false);
+  assert.equal(
+    audit.unresolved.some(({ message }) => /observation without evidence/i.test(message)),
+    true,
+  );
+});
+
+test("raw observation shorthand cannot bypass non-array proposal validation", async () => {
+  const adapter: ModelAdapter = {
+    async run(task) {
+      return {
+        ...rawObservation(task, 0.9),
+        rules: { rule: candidateRule("shorthand-rule"), confidence: 0.9 },
+        classifications: "shorthand-classification",
+      };
+    },
+  };
+
+  const run = await observeDeck(request, adapter);
+
+  assert.equal(run.results.every((result) => !result.ok), true);
+  assert.match(
+    run.results.flatMap((result) => result.ok ? [] : result.errors).join("\n"),
+    /rules must be an array.*classifications must be an array/is,
   );
 });
 

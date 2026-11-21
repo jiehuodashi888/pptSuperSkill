@@ -119,6 +119,37 @@ function catalogIntegrityFindings(run: ObservationRun): AuditFinding[] {
       });
     }
   }
+  for (const result of run.results) {
+    if (!result.ok) {
+      continue;
+    }
+    if (result.observations.length === 0) {
+      findings.push({
+        type: "catalog-integrity",
+        message: `Successful observer ${result.observerId} has no evidence-backed observation`,
+        references: [result.observerId],
+      });
+    }
+    for (const observation of result.observations) {
+      if (
+        observation.category !== result.observerId ||
+        observation.agent_id !== result.observerId
+      ) {
+        findings.push({
+          type: "catalog-integrity",
+          message: `Observation ${observation.observation_id} does not belong to observer ${result.observerId}`,
+          references: [result.observerId, observation.observation_id],
+        });
+      }
+      if (observation.evidence.length === 0) {
+        findings.push({
+          type: "catalog-integrity",
+          message: `Successful observer ${result.observerId} has an observation without evidence`,
+          references: [result.observerId, observation.observation_id],
+        });
+      }
+    }
+  }
   return findings;
 }
 
