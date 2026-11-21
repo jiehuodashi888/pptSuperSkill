@@ -81,7 +81,7 @@ export function proposeClassification(
     throw new Error("A classification proposal requires evidence");
   }
 
-  const request: ApprovalRequest = {
+  const requestData = {
     request_id: input.proposal_id,
     status: "candidate",
     change: Object.freeze({
@@ -93,8 +93,12 @@ export function proposeClassification(
       input.evidence.map((item) => Object.freeze({ ...item })),
     ),
     proposed_by: input.proposed_by,
-    [approvalRequestBrand]: true,
   };
+  Object.defineProperty(requestData, approvalRequestBrand, {
+    value: true,
+    enumerable: false,
+  });
+  const request = requestData as ApprovalRequest;
 
   Object.freeze(request);
   issuedApprovalRequests.add(request);

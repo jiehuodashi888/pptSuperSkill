@@ -9,11 +9,17 @@ import {
   type TaxonomyEntry,
 } from "../contracts/taxonomy.js";
 
-export type ApprovalState =
-  | ApprovalRequest
-  | (Omit<ApprovalRequest, "status"> & {
-      readonly status: "approved" | "rejected";
-    });
+const terminalApprovalStateBrand: unique symbol = Symbol("terminalApprovalState");
+
+export type TerminalApprovalState = Pick<
+  ApprovalRequest,
+  "request_id" | "change" | "evidence" | "proposed_by"
+> & {
+  readonly status: "approved" | "rejected";
+  readonly [terminalApprovalStateBrand]: true;
+};
+
+export type ApprovalState = ApprovalRequest | TerminalApprovalState;
 
 export type ApprovalDecision =
   | { action: "approve" }
@@ -35,6 +41,7 @@ const validateApprovalRequest: ValidateFunction = new Ajv.default({
   strict: true,
 }).compile(approvalSchema);
 const decidedRequests = new WeakSet<object>();
+const authenticTerminalStates = new WeakSet<object>();
 
 export function applyApproval(
   state: ApprovalState,
@@ -67,14 +74,37 @@ export function applyApproval(
 
   decidedRequests.add(state);
 
-  return Object.freeze({
+  const terminalData = {
     ...state,
     status: decision.action === "approve" ? "approved" : "rejected",
     change: cloneChange(state.change),
     evidence: Object.freeze(
       state.evidence.map((item) => Object.freeze({ ...item })),
     ),
+  } as const;
+  const terminalState = markTerminalState(terminalData);
+  authenticTerminalStates.add(terminalState);
+  return Object.freeze(terminalState);
+}
+
+export function isAuthenticTerminalApprovalState(
+  value: unknown,
+): value is TerminalApprovalState {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    authenticTerminalStates.has(value)
+  );
+}
+
+function markTerminalState<T extends object>(
+  value: T,
+): T & { readonly [terminalApprovalStateBrand]: true } {
+  Object.defineProperty(value, terminalApprovalStateBrand, {
+    value: true,
+    enumerable: false,
   });
+  return value as T & { readonly [terminalApprovalStateBrand]: true };
 }
 
 function cloneChange(change: TaxonomyChange): TaxonomyChange {

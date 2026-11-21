@@ -12,6 +12,7 @@ import {
 } from "../runtime/src/contracts/taxonomy.js";
 import {
   applyApproval,
+  isAuthenticTerminalApprovalState,
   type ApprovalDecision,
   type ApprovalState,
 } from "../runtime/src/approvals/state-machine.js";
@@ -82,6 +83,15 @@ test("a caller-created candidate cannot self-assert approval provenance", () => 
     () => applyApproval(callerCreated, { action: "approve" }),
     /issued classification proposal/i,
   );
+});
+
+test("terminal-state authentication rejects a spread candidate with self-asserted status", () => {
+  const candidate = proposeClassification(proposal);
+  const forgedTerminal = { ...candidate, status: "approved" };
+  const genuineTerminal = applyApproval(candidate, { action: "approve" });
+
+  assert.equal(isAuthenticTerminalApprovalState(forgedTerminal), false);
+  assert.equal(isAuthenticTerminalApprovalState(genuineTerminal), true);
 });
 
 test("approval rejects empty or malformed evidence at the state-machine boundary", () => {

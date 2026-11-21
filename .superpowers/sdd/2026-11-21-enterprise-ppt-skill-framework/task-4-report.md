@@ -65,3 +65,26 @@ Implemented and committed as `38c9537` (`feat: protect taxonomy and approval sta
 - The three taxonomy dimensions and their example files are unchanged and remain independent.
 - Proposal creation still clones candidate tags and evidence, and now freezes those clones; approved taxonomy input is never accepted or mutated.
 - No Task 3 cleanup code or tests were changed.
+
+## Fix Round 2: Terminal-State Authenticity
+
+### Reviewer Finding Addressed
+
+- Terminal results now have a distinct opaque `TerminalApprovalState` type rather than inheriting the candidate brand. Both candidate and terminal markers are installed as non-enumerable symbol properties. Genuine terminal object identities are also recorded in a private `WeakSet`, and consumers can call the exported `isAuthenticTerminalApprovalState` predicate to authenticate a result. Spreading an issued candidate and replacing its status therefore copies neither marker and cannot satisfy the public terminal-consumption boundary.
+
+### Regression RED
+
+- `npm test -- tests/taxonomy-approval.test.ts` — FAIL as expected with `SyntaxError: ... does not provide an export named 'isAuthenticTerminalApprovalState'`, proving no terminal authentication boundary existed.
+
+### Regression GREEN and Verification
+
+- Focused: `npm test -- tests/taxonomy-approval.test.ts` — PASS, 31 passed, 0 failed, 1 Windows-only symlink test skipped.
+- Full: `npm test` — PASS, 31 passed, 0 failed, 1 Windows-only symlink test skipped.
+- Types: `npm run typecheck` — PASS.
+- Patch hygiene: `git diff --check` — PASS.
+
+### Preserved Protections
+
+- State-machine schema validation still runs before provenance and lifecycle checks, so evidence-free or malformed requests cannot be approved.
+- Issued candidates remain deeply frozen and single-use.
+- The taxonomy files, independent dimensions, example data, and proposal immutability behavior are unchanged.
