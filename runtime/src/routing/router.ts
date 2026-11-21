@@ -64,6 +64,7 @@ export interface ApprovedRoute {
 }
 
 const issuedDecisions = new WeakSet<object>();
+const issuedApprovedRoutes = new WeakSet<object>();
 
 export function routeScenario(
   request: GenerationRequest,
@@ -127,7 +128,7 @@ export function requireApprovedRoute(decision: RoutingDecision): ApprovedRoute {
     throw new Error("Route requires confirmation before generation");
   }
 
-  return Object.freeze({
+  const approvedRoute: ApprovedRoute = Object.freeze({
     styleRefs: Object.freeze([...decision.selectedStyleRefs]),
     templateRefs: Object.freeze([...decision.templateRefs]),
     confidence: decision.confidence,
@@ -137,6 +138,13 @@ export function requireApprovedRoute(decision: RoutingDecision): ApprovedRoute {
       )?.evidence ?? []),
     ]),
   });
+  issuedApprovedRoutes.add(approvedRoute);
+  return approvedRoute;
+}
+
+/** Approval handles are process-local; persisted routes must be routed again. */
+export function isAuthenticApprovedRoute(value: unknown): value is ApprovedRoute {
+  return typeof value === "object" && value !== null && issuedApprovedRoutes.has(value);
 }
 
 function freezeRequest(request: GenerationRequest): GenerationRequest {
