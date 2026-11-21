@@ -46,7 +46,11 @@ export interface Rule {
   status: RuleStatus;
 }
 
-export type ContractName = "capability-manifest" | "observation" | "rule";
+export type ContractName =
+  | "capability-manifest"
+  | "instance"
+  | "observation"
+  | "rule";
 
 export interface ValidationResult {
   ok: boolean;

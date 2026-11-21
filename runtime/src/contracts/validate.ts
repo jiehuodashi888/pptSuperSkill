@@ -14,6 +14,7 @@ const ajv = new Ajv.default({ allErrors: true, strict: true });
 
 const validators: Record<ContractName, ValidateFunction> = {
   "capability-manifest": ajv.compile(loadSchema("capability-manifest.schema.json")),
+  instance: ajv.compile(loadSchema("instance.schema.json")),
   observation: ajv.compile(loadSchema("observation.schema.json")),
   rule: ajv.compile(loadSchema("rule.schema.json")),
 };
