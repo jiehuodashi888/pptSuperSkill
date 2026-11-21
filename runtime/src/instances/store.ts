@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
   loadInstanceManifest,
@@ -17,29 +17,6 @@ function isWithin(root: string, candidate: string): boolean {
       pathFromRoot !== ".." &&
       !pathFromRoot.startsWith(`..${sep}`))
   );
-}
-
-function canonicalizeDestination(target: string): string {
-  const missingSegments: string[] = [];
-  let existingAncestor = target;
-
-  for (;;) {
-    try {
-      return join(realpathSync.native(existingAncestor), ...missingSegments.reverse());
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT" && code !== "ENOTDIR") {
-        throw error;
-      }
-
-      const parent = resolve(existingAncestor, "..");
-      if (parent === existingAncestor) {
-        throw error;
-      }
-      missingSegments.push(existingAncestor.slice(parent.length + (parent.endsWith(sep) ? 0 : 1)));
-      existingAncestor = parent;
-    }
-  }
 }
 
 /**
@@ -85,7 +62,7 @@ export class InstanceStore {
       throw new Error(`Instance asset reference escapes its root: ${assetRef}`);
     }
 
-    const canonicalTarget = canonicalizeDestination(lexicalTarget);
+    const canonicalTarget = realpathSync.native(lexicalTarget);
     if (!isWithin(this.root, canonicalTarget)) {
       throw new Error(`Instance asset reference escapes its canonical root: ${assetRef}`);
     }

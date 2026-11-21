@@ -42,3 +42,19 @@ Implemented and committed as `a1c2e2d` (`feat: isolate local company instances`)
 
 - `instance.yaml` is intentionally restricted to JSON syntax, which is a valid YAML subset. Supporting broader YAML syntax later would require a dedicated safe parser dependency and corresponding contract tests.
 - Path validation limits accidental and application-level cross-instance access, but cannot replace OS permissions when the process identity can read multiple company roots.
+
+## Corrective Patch — Round 1
+
+### Root Cause and Changes
+
+- `loadInstanceManifest` previously read `instance.yaml` without canonicalizing it, so a file symlink could redirect loading to a valid manifest outside the selected company root. It now requires both the company root and manifest to exist canonically and rejects a canonical manifest path outside that root before reading.
+- `InstanceStore.resolve` previously reconstructed destinations from the nearest existing ancestor. A dangling directory junction was therefore treated like ordinary missing path components and could later expose an outside target. Resolution now requires the complete asset path to exist and canonicalize successfully; unresolved aliases and other missing components are invalid.
+- The example company's declared profile asset now exists so successful resolution still exercises a real canonical file.
+- Focused regressions cover an externally symlinked manifest and a directory junction whose outside target is initially absent and later materialized. The latter asserts rejection in both states.
+
+### Verification Commands and Results
+
+- `npm test -- tests/instance-store.test.ts` — PASS: 22 tests discovered by the package command, 21 passed, 0 failed, 1 skipped. The skip is the external-manifest file-symlink test because this Windows host returned `EPERM`; the dangling-junction regression executed and passed.
+- `npm test` — PASS: 22 tests, 21 passed, 0 failed, 1 skipped for the same Windows file-symlink privilege limitation.
+- `npm run typecheck` — PASS (`tsc --noEmit`).
+- `git diff --check` — PASS.

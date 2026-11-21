@@ -1,5 +1,5 @@
 {
   "company_id": "example-company",
   "core_version": "0.1.0",
-  "assets": []
+  "assets": ["styles/default/profile.json"]
 }

@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 import { validateContract } from "../contracts/validate.js";
 
@@ -17,9 +17,20 @@ export async function loadInstanceManifest(
   let value: unknown;
 
   try {
+    const canonicalCompanyRoot = await realpath(companyRoot);
+    const canonicalManifestPath = await realpath(manifestPath);
+    const pathFromRoot = relative(canonicalCompanyRoot, canonicalManifestPath);
+    if (
+      isAbsolute(pathFromRoot) ||
+      pathFromRoot === ".." ||
+      pathFromRoot.startsWith(`..${sep}`)
+    ) {
+      throw new Error("Instance manifest escapes the canonical company root");
+    }
+
     // JSON is a YAML subset. Keeping manifests in this safe subset avoids executable
     // YAML features and adds no parser-specific behavior at the trust boundary.
-    value = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
+    value = JSON.parse(await readFile(canonicalManifestPath, "utf8")) as unknown;
   } catch (error) {
     throw new Error(`Cannot load instance manifest at ${manifestPath}`, {
       cause: error,

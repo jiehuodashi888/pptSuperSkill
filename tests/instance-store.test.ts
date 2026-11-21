@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -51,6 +58,12 @@ test("resolve rejects lexical traversal outside the company root", async () => {
 
   assert.throws(() => store.resolve("../other-company/instance.yaml"));
   assert.throws(() => store.resolve("styles\\..\\..\\other-company\\instance.yaml"));
+});
+
+test("resolve rejects a missing asset that cannot be canonically contained", async () => {
+  const store = await openInstance(instancesRoot, "example-company");
+
+  assert.throws(() => store.resolve("styles/default/missing.json"));
 });
 
 test("resolve rejects an existing link whose canonical target is outside the company root", async (t) => {
@@ -105,4 +118,47 @@ test("openInstance rejects a company directory aliased to another instance path"
   await symlink(otherCompanyRoot, join(fixtureRoot, "company-a"), "junction");
 
   await assert.rejects(() => openInstance(fixtureRoot, "company-a"));
+});
+
+test("openInstance rejects a manifest symlinked outside the company root", async (t) => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "instance-store-"));
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const companyRoot = await writeManifest(fixtureRoot, "company-a");
+  const outsideManifest = join(fixtureRoot, "outside-instance.yaml");
+  await writeFile(
+    outsideManifest,
+    JSON.stringify({
+      company_id: "company-a",
+      core_version: "0.1.0",
+      assets: [],
+    }),
+  );
+  await unlink(join(companyRoot, "instance.yaml"));
+  try {
+    await symlink(outsideManifest, join(companyRoot, "instance.yaml"), "file");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") {
+      t.skip("file symlinks are not permitted on this Windows host");
+      return;
+    }
+    throw error;
+  }
+
+  await assert.rejects(() => openInstance(fixtureRoot, "company-a"));
+});
+
+test("resolve rejects a dangling junction that can later expose an outside file", async (t) => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "instance-store-"));
+  t.after(() => rm(fixtureRoot, { recursive: true, force: true }));
+  const companyRoot = await writeManifest(fixtureRoot, "company-a");
+  const futureOutsideRoot = join(fixtureRoot, "future-outside");
+  await symlink(futureOutsideRoot, join(companyRoot, "linked"), "junction");
+  const store = await openInstance(fixtureRoot, "company-a");
+
+  assert.throws(() => store.resolve("linked/secret.txt"));
+
+  await mkdir(futureOutsideRoot);
+  await writeFile(join(futureOutsideRoot, "secret.txt"), "outside-secret");
+
+  assert.throws(() => store.resolve("linked/secret.txt"));
 });
