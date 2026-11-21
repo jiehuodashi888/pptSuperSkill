@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -278,6 +279,106 @@ test("observation task snapshots are independent of mutable built-in prototypes"
     restoreDescriptor(Object.prototype, "execute", objectExecute);
     restoreDescriptor(Array.prototype, "provider", arrayProvider);
     restoreDescriptor(Array.prototype, "run", arrayRun);
+  }
+});
+
+test("task arrays exclude pollution present before module initialization", () => {
+  // A fresh process ensures the static import above cannot satisfy this import.
+  const catalogUrl = new URL("../runtime/src/observers/catalog.ts", import.meta.url);
+  execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", `
+    import assert from "node:assert/strict";
+    Object.defineProperty(Array.prototype, "provider", {
+      value: "before-import", configurable: true,
+    });
+    Object.defineProperty(Array.prototype, "run", {
+      value: () => "before-import", configurable: true,
+    });
+    let createObservationTask;
+    try {
+      ({ createObservationTask } = await import(${JSON.stringify(catalogUrl.href)}));
+    } finally {
+      delete Array.prototype.provider;
+      delete Array.prototype.run;
+    }
+    const task = createObservationTask("typography", {
+      companyId: "example-company", level: "slide", sourceIds: ["deck-001"],
+      renderedAssets: ["slides/1.png"], structuralFacts: { rows: [["nested"]] },
+    });
+    for (const array of [task.input.sourceIds, task.input.renderedAssets,
+      task.input.structuralFacts.rows, task.input.structuralFacts.rows[0]]) {
+      assert.equal("provider" in array, false);
+      assert.equal("run" in array, false);
+      assert.equal(Object.getPrototypeOf(Object.getPrototypeOf(array)), null);
+      assert.equal(Object.isFrozen(array), true);
+    }
+  `], { stdio: "pipe" });
+});
+
+test("task arrays inherit no shared mutable descriptor values or mutators", () => {
+  const sources = createObservationTask("typography", input).input.sourceIds;
+  const prototype = Object.getPrototypeOf(sources) as Record<PropertyKey, unknown>;
+  assert.equal(prototype[Symbol.unscopables], undefined);
+  assert.equal(prototype.constructor, undefined);
+  for (const name of ["push", "pop", "splice", "sort", "reverse", "fill", "copyWithin"]) {
+    assert.equal(prototype[name], undefined);
+  }
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(prototype))) {
+    assert.equal(typeof descriptor.value, "function");
+    assert.equal(Object.isFrozen(descriptor.value), true);
+    assert.equal(Object.getPrototypeOf(descriptor.value), null);
+  }
+  assert.notEqual(prototype.includes, Array.prototype.includes);
+  const unscopables = Array.prototype[Symbol.unscopables] as Record<string, unknown>;
+  const previous = Object.getOwnPropertyDescriptor(unscopables, "provider");
+  try {
+    Object.defineProperty(unscopables, "provider", {
+      value: "shared-mutation", configurable: true,
+    });
+    assert.equal(prototype[Symbol.unscopables], undefined);
+  } finally {
+    restoreDescriptor(unscopables, "provider", previous);
+  }
+});
+
+test("readonly array methods preserve isolated results under prototype pollution", () => {
+  const sources = createObservationTask("typography", input).input.sourceIds;
+  const previousProvider = Object.getOwnPropertyDescriptor(Array.prototype, "provider");
+  const previousRun = Object.getOwnPropertyDescriptor(Array.prototype, "run");
+  try {
+    Object.defineProperty(Array.prototype, "provider", {
+      value: "polluted-provider", configurable: true,
+    });
+    Object.defineProperty(Array.prototype, "run", {
+      value: () => "polluted-run", configurable: true,
+    });
+    const mapped = sources.map((source) => [source]);
+    const results = [sources.slice(), sources.filter(Boolean), mapped, mapped[0]!,
+      sources.entries().next().value!];
+    for (const result of results) {
+      assert.equal("provider" in result, false);
+      assert.equal("run" in result, false);
+      assert.equal(Object.isFrozen(result), true);
+      assert.equal(Object.getPrototypeOf(Object.getPrototypeOf(result)), null);
+    }
+    assert.deepEqual(toPlainData(mapped), [["deck-001"]]);
+    assert.deepEqual([...sources], ["deck-001"]);
+    assert.deepEqual([...sources.keys()], [0]);
+    const iterator = sources.values();
+    assert.equal(Object.getPrototypeOf(iterator), null);
+    assert.equal(Object.isFrozen(iterator), true);
+    const step = iterator.next();
+    assert.equal(Object.getPrototypeOf(step), null);
+    assert.equal(Object.isFrozen(step), true);
+    assert.equal(step.value, "deck-001");
+    assert.equal(iterator.next().done, true);
+    assert.equal(sources.includes("deck-001"), true);
+    assert.equal(sources.join(","), "deck-001");
+    assert.equal(sources.some((source) => source === "deck-001"), true);
+    assert.equal(sources.slice().map((source) => source.toUpperCase())[0], "DECK-001");
+    assert.throws(() => sources.map(() => ({ provider: "callback-provider" })), /provider/i);
+  } finally {
+    restoreDescriptor(Array.prototype, "provider", previousProvider);
+    restoreDescriptor(Array.prototype, "run", previousRun);
   }
 });
 

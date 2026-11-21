@@ -223,7 +223,7 @@ function cloneJsonArray(value: unknown[], path: string): readonly unknown[] {
     if (descriptor === undefined) {
       throw new Error(`${path} must not contain sparse array entries`);
     }
-    clone.push(cloneJsonValue(descriptor.value, `${path}[${index}]`));
+    clone[index] = cloneJsonValue(descriptor.value, `${path}[${index}]`);
   }
   return Object.freeze(clone);
 }
@@ -262,11 +262,81 @@ function descriptorValue(
 
 function createSafeArrayPrototype(): object {
   const prototype = Object.create(null) as object;
-  Object.defineProperties(
-    prototype,
-    Object.getOwnPropertyDescriptors(
-      Array.prototype,
-    ) as unknown as PropertyDescriptorMap,
-  );
+  // Deliberately expose only readonly operations. Never copy live descriptors:
+  // constructor, mutators, unscopables, and ambient additions are not task data.
+  // Methods that compute new data re-enter the JSON snapshot boundary, including
+  // callback-produced nested arrays. Other methods (e.g. reduce) are not exposed.
+  const scalarMethods = {
+    at: Array.prototype.at,
+    includes: Array.prototype.includes,
+    indexOf: Array.prototype.indexOf,
+    lastIndexOf: Array.prototype.lastIndexOf,
+    every: Array.prototype.every,
+    some: Array.prototype.some,
+    find: Array.prototype.find,
+    findIndex: Array.prototype.findIndex,
+    forEach: Array.prototype.forEach,
+    join: Array.prototype.join,
+    toString: Array.prototype.toString,
+  };
+  const arrayMethods = {
+    map: Array.prototype.map,
+    filter: Array.prototype.filter,
+    slice: Array.prototype.slice,
+  };
+  for (const [name, method] of Object.entries(scalarMethods)) {
+    defineReadonlyMethod(prototype, name, {
+      invoke(this: readonly unknown[], ...args: unknown[]) {
+        return Reflect.apply(method, this, args);
+      },
+    }.invoke);
+  }
+  for (const [name, method] of Object.entries(arrayMethods)) {
+    defineReadonlyMethod(prototype, name, {
+      invoke(this: readonly unknown[], ...args: unknown[]) {
+        return cloneJsonArray(Reflect.apply(method, this, args), name);
+      },
+    }.invoke);
+  }
+  for (const kind of ["values", "keys", "entries"] as const) {
+    const method = {
+      invoke(this: readonly unknown[]) {
+        return createSafeArrayIterator(this, kind);
+      },
+    }.invoke;
+    defineReadonlyMethod(prototype, kind, method);
+    if (kind === "values") {
+      defineReadonlyMethod(prototype, Symbol.iterator, method);
+    }
+  }
   return Object.freeze(prototype);
+}
+
+function defineReadonlyMethod(target: object, key: PropertyKey, method: Function): void {
+  // These locally created method functions have no own prototype object and
+  // inherit no mutable state from Function.prototype or Object.prototype.
+  Object.setPrototypeOf(method, null);
+  Object.defineProperty(target, key, { value: Object.freeze(method) });
+}
+
+function createSafeArrayIterator(
+  array: readonly unknown[],
+  kind: "values" | "keys" | "entries",
+): IterableIterator<unknown> {
+  let index = 0;
+  const iterator = Object.create(null) as IterableIterator<unknown>;
+  defineReadonlyMethod(iterator, "next", {
+    next() {
+      const done = index >= array.length;
+      const value = done ? undefined : kind === "keys" ? index
+        : kind === "entries" ? cloneJsonArray([index, array[index]], "entries")
+          : array[index];
+      if (!done) index += 1;
+      return Object.freeze(Object.assign(Object.create(null), { value, done }));
+    },
+  }.next);
+  defineReadonlyMethod(iterator, Symbol.iterator, {
+    iterator() { return iterator; },
+  }.iterator);
+  return Object.freeze(iterator);
 }
