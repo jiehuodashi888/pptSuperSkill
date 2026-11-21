@@ -3,6 +3,7 @@
 node_modules/
 dist/
 coverage/
+instances/*/tests/public-fixtures/
 *.pptx
 *.potx
 *.pdf

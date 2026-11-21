@@ -1,0 +1,6 @@
+{
+  "status": "not-acquired",
+  "classification": "test-only",
+  "fixtures": [],
+  "note": "No public URL has been supplied and confirmed. Acquisition writes a per-fixture provenance manifest under tests/public-fixtures; public examples are not enterprise evidence."
+}
