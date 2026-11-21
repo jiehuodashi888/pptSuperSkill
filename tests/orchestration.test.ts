@@ -58,7 +58,13 @@ test("serial fallback invokes every observer once in catalog order", async () =>
 test("slide, deck, and corpus runs preserve their requested observation level", async () => {
   for (const level of ["slide", "deck", "corpus"] as const) {
     const adapter = new RecordingAdapter();
-    const run = await observeDeck({ ...request, level }, adapter);
+    const run = await observeDeck({
+      ...request,
+      level,
+      ...(level === "slide"
+        ? { slideSelector: { slideNumber: 1, locatorPrefix: "deck-001/slide1.xml" } }
+        : {}),
+    }, adapter);
 
     assert.equal(run.level, level);
     assert.equal(adapter.calls.length, 9);
@@ -231,6 +237,225 @@ test("an observer envelope with no observations is unresolved absent evidence", 
   assert.equal(audit.unresolved.every(({ type }) => type === "absent-evidence"), true);
 });
 
+test("slide observation evidence must match the requested slide selector and locator prefix", async () => {
+  const slideRequest = {
+    ...request,
+    level: "slide" as const,
+    slideSelector: {
+      slideNumber: 2,
+      locatorPrefix: "deck-001/slide2.xml",
+    },
+  } as ObservationRequest & {
+    slideSelector: { slideNumber: number; locatorPrefix: string };
+  };
+  const selectors: unknown[] = [];
+  const adapter: ModelAdapter = {
+    async run(task) {
+      const input = task.input as typeof task.input & {
+        slideSelector?: { slideNumber: number; locatorPrefix: string };
+      };
+      selectors.push(input.slideSelector);
+      return {
+        ...rawObservation(task, 0.9),
+        evidence: [{
+          ...evidence("deck-001"),
+          slide_number: 2,
+          locator: "deck-001/slide1.xml#shape-1",
+        }],
+      };
+    },
+  };
+
+  const run = await observeDeck(slideRequest, adapter);
+
+  assert.deepEqual(
+    selectors.map((selector) => JSON.parse(JSON.stringify(selector)) as unknown),
+    Array.from({ length: OBSERVER_IDS.length }, () => slideRequest.slideSelector),
+  );
+  assert.equal(run.results.every((result) => !result.ok), true);
+  assert.match(
+    run.results.flatMap((result) => result.ok ? [] : result.errors).join("\n"),
+    /locator.*slide selector/i,
+  );
+});
+
+test("slide selectors are required only for slide-level requests", async () => {
+  const adapter = new RecordingAdapter();
+
+  await assert.rejects(
+    observeDeck({ ...request, level: "slide" }, adapter),
+    /requires a slideSelector/i,
+  );
+  await assert.rejects(
+    observeDeck({
+      ...request,
+      slideSelector: { slideNumber: 1, locatorPrefix: "deck-001/slide1.xml" },
+    }, adapter),
+    /only valid for slide/i,
+  );
+  assert.equal(adapter.calls.length, 0);
+});
+
+test("observation, rule, and classification evidence cannot escape request sources or level", async () => {
+  const adapter: ModelAdapter = {
+    async run(task) {
+      const foreignEvidence = evidence("other-company:deck-999");
+      return {
+        observations: [{
+          ...rawObservation(task, 0.9),
+          evidence: [foreignEvidence],
+        }],
+        rules: [{
+          rule: {
+            ...candidateRule("rule-foreign"),
+            scope: "corpus",
+            evidence: [foreignEvidence],
+          },
+          confidence: 0.9,
+        }],
+        classifications: [{
+          classificationId: "class-foreign",
+          taxonomy: "visual_style",
+          label: "foreign",
+          confidence: 0.9,
+          status: "candidate",
+          evidence: [foreignEvidence],
+        }],
+      };
+    },
+  };
+
+  const run = await observeDeck(request, adapter);
+
+  assert.equal(run.results.every((result) => !result.ok), true);
+  assert.equal(run.results.every((result) => result.observations.length === 0), true);
+  assert.equal(run.results.every((result) => result.rules.length === 0), true);
+  assert.equal(run.results.every((result) => result.classifications.length === 0), true);
+  assert.match(
+    run.results.flatMap((result) => result.ok ? [] : result.errors).join("\n"),
+    /source|scope/i,
+  );
+});
+
+test("present rule and classification fields must be arrays", async () => {
+  const adapter: ModelAdapter = {
+    async run(task) {
+      return {
+        observations: [rawObservation(task, 0.9)],
+        rules: { rule: candidateRule("not-an-array"), confidence: 0.9 },
+        classifications: "not-an-array",
+      };
+    },
+  };
+
+  const run = await observeDeck(request, adapter);
+
+  assert.equal(run.results.every((result) => !result.ok), true);
+  assert.match(
+    run.results.flatMap((result) => result.ok ? [] : result.errors).join("\n"),
+    /rules must be an array.*classifications must be an array/is,
+  );
+});
+
+test("final audit rejects missing, duplicate, and unexpected observer results", () => {
+  const complete = manualRun({ results: [] });
+  const typography = complete.results.find(
+    ({ observerId }) => observerId === "typography",
+  )!;
+  const malformed: ObservationRun = {
+    ...complete,
+    results: [
+      ...complete.results.filter(({ observerId }) => observerId !== "content"),
+      typography,
+      {
+        ...typography,
+        observerId: "unexpected-observer",
+      } as unknown as ObservationRun["results"][number],
+    ],
+  };
+
+  const audit = auditRun(malformed);
+
+  assert.equal(audit.complete, false);
+  assert.deepEqual(
+    audit.unresolved
+      .filter(({ type }) => type === "catalog-integrity")
+      .map(({ message }) => message),
+    [
+      "Missing observer result: content",
+      "Duplicate observer result: typography",
+      "Unexpected observer result: unexpected-observer",
+    ],
+  );
+});
+
+test("final audit never completes an empty partial run", () => {
+  const audit = auditRun({
+    companyId: "example-company",
+    level: "deck",
+    sourceIds: ["deck-001"],
+    executionMode: "serial",
+    results: [],
+  });
+
+  assert.equal(audit.complete, false);
+  assert.equal(
+    audit.unresolved.filter(({ type }) => type === "catalog-integrity").length,
+    OBSERVER_IDS.length,
+  );
+});
+
+test("final audit detects conflicting payloads that reuse observation and rule identities", () => {
+  const duplicateObservationId = "observation-shared-id";
+  const duplicateRuleId = "rule-shared-id";
+  const run = manualRun({
+    results: [
+      {
+        observerId: "typography",
+        ok: true,
+        observations: [{
+          ...normalizedObservation("typography", "Typography payload", 0.9),
+          observation_id: duplicateObservationId,
+        }],
+        rules: [{
+          rule: {
+            ...candidateRule(duplicateRuleId),
+            statement: "Typography rule payload",
+          },
+          confidence: 0.9,
+        }],
+        classifications: [],
+      },
+      {
+        observerId: "layout",
+        ok: true,
+        observations: [{
+          ...normalizedObservation("layout", "Layout payload", 0.9),
+          observation_id: duplicateObservationId,
+        }],
+        rules: [{
+          rule: {
+            ...candidateRule(duplicateRuleId),
+            statement: "Layout rule payload",
+          },
+          confidence: 0.9,
+        }],
+        classifications: [],
+      },
+    ],
+  });
+
+  const conflicts = auditRun(run).unresolved.filter(({ type }) => type === "conflict");
+
+  assert.deepEqual(
+    conflicts.map(({ message }) => message),
+    [
+      `Conflicting payloads reuse observation_id ${duplicateObservationId}`,
+      `Conflicting payloads reuse rule_id ${duplicateRuleId}`,
+    ],
+  );
+});
+
 function rawObservation(
   task: AgentTask,
   confidence: number,
@@ -262,6 +487,20 @@ function normalizedObservation(
   };
 }
 
+function candidateRule(ruleId: string): Rule {
+  return {
+    rule_id: ruleId,
+    scope: "deck",
+    statement: "Use a compact title hierarchy",
+    observed_value: { titleSize: 28 },
+    priority: "SHOULD",
+    frequency: 0.7,
+    evidence: [evidence("deck-001")],
+    exceptions: [],
+    status: "candidate",
+  };
+}
+
 function evidence(sourceId: string) {
   return {
     source_id: sourceId,
@@ -273,11 +512,26 @@ function evidence(sourceId: string) {
 }
 
 function manualRun(overrides: Pick<ObservationRun, "results">): ObservationRun {
+  const overridesByObserver = new Map(
+    overrides.results.map((result) => [result.observerId, result]),
+  );
   return {
     companyId: "example-company",
     level: "deck" as ObservationLevel,
     sourceIds: ["deck-001"],
     executionMode: "serial",
-    results: overrides.results,
+    results: OBSERVER_IDS.map((observerId) =>
+      overridesByObserver.get(observerId) ?? {
+        observerId,
+        ok: true,
+        observations: [normalizedObservation(
+          observerId,
+          `${observerId} baseline`,
+          0.9,
+        )],
+        rules: [],
+        classifications: [],
+      }
+    ),
   };
 }

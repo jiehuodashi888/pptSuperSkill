@@ -12,6 +12,7 @@ import {
   type ObservationInput,
   type ObservationLevel,
   type ObserverId,
+  type SlideSelector,
 } from "../observers/catalog.js";
 import { normalizeObservation } from "../observers/normalize.js";
 import type { ModelAdapter } from "./model-adapter.js";
@@ -23,6 +24,7 @@ export interface ObservationRequest {
   readonly companyId: string;
   readonly level: ObservationLevel;
   readonly sourceIds: readonly string[];
+  readonly slideSelector?: SlideSelector;
   readonly capabilities: CapabilityManifest;
   readonly structuralFacts?: unknown;
   readonly renderedAssets?: readonly string[];
@@ -69,6 +71,7 @@ export async function observeDeck(
   request: ObservationRequest,
   adapter: ModelAdapter,
 ): Promise<ObservationRun> {
+  validateRequestScope(request);
   const concurrency = requestedConcurrency(request);
   const executionMode = request.capabilities.parallelAgents
     ? "parallel"
@@ -93,6 +96,9 @@ function createTasks(request: ObservationRequest): AgentTask[] {
     companyId: request.companyId,
     level: request.level,
     sourceIds: request.sourceIds,
+    ...(request.slideSelector === undefined
+      ? {}
+      : { slideSelector: request.slideSelector }),
     capabilities: request.capabilities,
     ...(request.structuralFacts === undefined
       ? {}
@@ -130,19 +136,48 @@ function normalizeOutput(task: AgentTask, raw: unknown): ObserverRunResult {
   const normalized = envelope.observations.map((observation) =>
     normalizeObservation(observation, context)
   );
-  const observations = normalized.flatMap((result) =>
-    result.ok ? [result.observation] : []
-  );
-  const errors = normalized.flatMap((result) => result.ok ? [] : result.errors);
+  const observations: Observation[] = [];
+  const errors: string[] = [];
+  for (const result of normalized) {
+    if (!result.ok) {
+      errors.push(...result.errors);
+      continue;
+    }
+    const scopeErrors = evidenceScopeErrors(result.observation.evidence, task.input);
+    if (scopeErrors.length > 0) {
+      errors.push(...scopeErrors.map((error) =>
+        `Observation ${result.observation.observation_id}: ${error}`
+      ));
+    } else {
+      observations.push(result.observation);
+    }
+  }
   errors.push(...envelope.errors);
+  const rules = envelope.rules.filter(({ rule }) => {
+    const scopeErrors = [
+      ...(rule.scope === task.input.level
+        ? []
+        : [`rule scope ${rule.scope} does not match request level ${task.input.level}`]),
+      ...evidenceScopeErrors(rule.evidence, task.input),
+    ];
+    errors.push(...scopeErrors.map((error) => `Rule ${rule.rule_id}: ${error}`));
+    return scopeErrors.length === 0;
+  });
+  const classifications = envelope.classifications.filter((classification) => {
+    const scopeErrors = evidenceScopeErrors(classification.evidence, task.input);
+    errors.push(...scopeErrors.map((error) =>
+      `Classification ${classification.classificationId}: ${error}`
+    ));
+    return scopeErrors.length === 0;
+  });
 
   if (errors.length > 0) {
     return {
       observerId: task.observerId,
       ok: false,
       observations,
-      rules: envelope.rules,
-      classifications: envelope.classifications,
+      rules,
+      classifications,
       errors,
     };
   }
@@ -150,9 +185,45 @@ function normalizeOutput(task: AgentTask, raw: unknown): ObserverRunResult {
     observerId: task.observerId,
     ok: true,
     observations,
-    rules: envelope.rules,
-    classifications: envelope.classifications,
+    rules,
+    classifications,
   };
+}
+
+function validateRequestScope(request: ObservationRequest): void {
+  if (request.level === "slide" && request.slideSelector === undefined) {
+    throw new Error("Slide observation requires a slideSelector");
+  }
+  if (request.level !== "slide" && request.slideSelector !== undefined) {
+    throw new Error("slideSelector is only valid for slide observation");
+  }
+}
+
+function evidenceScopeErrors(
+  evidenceItems: readonly Evidence[],
+  input: ObservationInput,
+): string[] {
+  const allowedSources = new Set(input.sourceIds);
+  const errors: string[] = [];
+  for (const evidence of evidenceItems) {
+    if (!allowedSources.has(evidence.source_id)) {
+      errors.push(`evidence source ${evidence.source_id} is outside request sources`);
+    }
+    if (input.level === "slide") {
+      const selector = input.slideSelector!;
+      if (evidence.slide_number !== selector.slideNumber) {
+        errors.push(
+          `evidence slide ${evidence.slide_number} does not match slide selector ${selector.slideNumber}`,
+        );
+      }
+      if (!evidence.locator.startsWith(selector.locatorPrefix)) {
+        errors.push(
+          `evidence locator ${evidence.locator} does not match slide selector prefix ${selector.locatorPrefix}`,
+        );
+      }
+    }
+  }
+  return errors;
 }
 
 function normalizationContext(task: AgentTask) {
@@ -196,6 +267,15 @@ function outputEnvelope(raw: unknown): OutputEnvelope {
   const classifications = Array.isArray(raw.classifications)
     ? raw.classifications.filter(isClassificationProposal)
     : [];
+  if (Object.hasOwn(raw, "rules") && !Array.isArray(raw.rules)) {
+    errors.push("Observer output rules must be an array");
+  }
+  if (
+    Object.hasOwn(raw, "classifications") &&
+    !Array.isArray(raw.classifications)
+  ) {
+    errors.push("Observer output classifications must be an array");
+  }
   if (Array.isArray(raw.rules) && rules.length !== raw.rules.length) {
     errors.push("Observer output contains an invalid rule proposal");
   }

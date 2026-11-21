@@ -1,4 +1,5 @@
 import type { Observation, Rule } from "../contracts/types.js";
+import { OBSERVER_IDS } from "../observers/catalog.js";
 import type {
   ClassificationProposal,
   ObservationRun,
@@ -12,7 +13,8 @@ export type AuditFindingType =
   | "absent-evidence"
   | "observer-failure"
   | "low-confidence-rule"
-  | "candidate-classification";
+  | "candidate-classification"
+  | "catalog-integrity";
 
 export interface AuditFinding {
   readonly type: AuditFindingType;
@@ -30,6 +32,9 @@ export function auditRun(run: ObservationRun): FinalAudit {
   const rules = run.results.flatMap((result) => result.rules);
   const classifications = run.results.flatMap((result) => result.classifications);
   const unresolved = [
+    ...catalogIntegrityFindings(run),
+    ...observationIdentityConflicts(observations),
+    ...ruleIdentityConflicts(rules),
     ...observationConflicts(observations),
     ...ruleConflicts(rules),
     ...missingEvidenceFindings(run, rules, classifications),
@@ -41,6 +46,80 @@ export function auditRun(run: ObservationRun): FinalAudit {
     complete: unresolved.length === 0,
     unresolved: Object.freeze(unresolved),
   });
+}
+
+function observationIdentityConflicts(
+  observations: readonly Observation[],
+): AuditFinding[] {
+  const groups = new Map<string, Observation[]>();
+  for (const observation of observations) {
+    groups.set(observation.observation_id, [
+      ...(groups.get(observation.observation_id) ?? []),
+      observation,
+    ]);
+  }
+  return [...groups].flatMap(([observationId, group]) =>
+    group.length > 1 && new Set(group.map(stableJson)).size > 1
+      ? [{
+          type: "conflict" as const,
+          message: `Conflicting payloads reuse observation_id ${observationId}`,
+          references: [observationId],
+        }]
+      : []
+  );
+}
+
+function ruleIdentityConflicts(proposals: readonly RuleProposal[]): AuditFinding[] {
+  const groups = new Map<string, Rule[]>();
+  for (const { rule } of proposals) {
+    groups.set(rule.rule_id, [...(groups.get(rule.rule_id) ?? []), rule]);
+  }
+  return [...groups].flatMap(([ruleId, group]) =>
+    group.length > 1 && new Set(group.map(stableJson)).size > 1
+      ? [{
+          type: "conflict" as const,
+          message: `Conflicting payloads reuse rule_id ${ruleId}`,
+          references: [ruleId],
+        }]
+      : []
+  );
+}
+
+function catalogIntegrityFindings(run: ObservationRun): AuditFinding[] {
+  const expected = new Set<string>(OBSERVER_IDS);
+  const counts = new Map<string, number>();
+  for (const { observerId } of run.results) {
+    counts.set(observerId, (counts.get(observerId) ?? 0) + 1);
+  }
+  const findings: AuditFinding[] = [];
+  for (const observerId of OBSERVER_IDS) {
+    if (!counts.has(observerId)) {
+      findings.push({
+        type: "catalog-integrity",
+        message: `Missing observer result: ${observerId}`,
+        references: [observerId],
+      });
+    }
+  }
+  for (const [observerId, count] of counts) {
+    if (count > 1) {
+      findings.push({
+        type: "catalog-integrity",
+        message: `Duplicate observer result: ${observerId}`,
+        references: [observerId],
+      });
+    }
+  }
+  for (const observerId of counts.keys()) {
+    if (!expected.has(observerId)) {
+      findings.push({
+        type: "catalog-integrity",
+        message: `Unexpected observer result: ${observerId}`,
+        references: [observerId],
+      });
+    }
+  }
+  return findings;
 }
 
 function observationConflicts(observations: readonly Observation[]): AuditFinding[] {

@@ -16,10 +16,16 @@ export const OBSERVER_IDS = [
 export type ObserverId = (typeof OBSERVER_IDS)[number];
 export type ObservationLevel = "slide" | "deck" | "corpus";
 
+export interface SlideSelector {
+  readonly slideNumber: number;
+  readonly locatorPrefix: string;
+}
+
 export interface ObservationInput {
   readonly companyId: string;
   readonly level: ObservationLevel;
   readonly sourceIds: readonly string[];
+  readonly slideSelector?: SlideSelector;
   readonly capabilities?: CapabilityManifest;
   readonly structuralFacts?: unknown;
   readonly renderedAssets?: readonly string[];
@@ -37,6 +43,7 @@ const INPUT_FIELDS = new Set([
   "companyId",
   "level",
   "sourceIds",
+  "slideSelector",
   "capabilities",
   "structuralFacts",
   "renderedAssets",
@@ -84,6 +91,15 @@ function validateTaskInput(input: ObservationInput): void {
     throw new Error(`Unsupported observation level: ${input.level}`);
   }
   if (
+    input.slideSelector !== undefined &&
+    (!Number.isSafeInteger(input.slideSelector.slideNumber) ||
+      input.slideSelector.slideNumber < 1 ||
+      typeof input.slideSelector.locatorPrefix !== "string" ||
+      input.slideSelector.locatorPrefix.trim() === "")
+  ) {
+    throw new Error("Observation input contains an invalid slideSelector");
+  }
+  if (
     input.renderedAssets !== undefined &&
     (!Array.isArray(input.renderedAssets) ||
       input.renderedAssets.some(
@@ -117,6 +133,7 @@ function isolateInput(input: ObservationInput): ObservationInput {
     descriptorValue(descriptors, "sourceIds"),
     "sourceIds",
   );
+  const slideSelector = descriptorValue(descriptors, "slideSelector");
   const capabilities = descriptorValue(descriptors, "capabilities");
   const structuralFacts = descriptorValue(descriptors, "structuralFacts");
   const renderedAssets = descriptorValue(descriptors, "renderedAssets");
@@ -124,6 +141,14 @@ function isolateInput(input: ObservationInput): ObservationInput {
     companyId: companyId as string,
     level: level as ObservationLevel,
     sourceIds: sourceIds as readonly string[],
+    ...(slideSelector === undefined
+      ? {}
+      : {
+          slideSelector: cloneJsonValue(
+            slideSelector,
+            "slideSelector",
+          ) as SlideSelector,
+        }),
     ...(capabilities === undefined
       ? {}
       : {
