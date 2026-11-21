@@ -1,0 +1,23 @@
+{
+  "mappings": [
+    {
+      "mappingId": "annual-executive-report",
+      "styleRef": "styles/business-formal",
+      "businessType": "annual-report",
+      "audience": "executive",
+      "department": "finance",
+      "deliveryContext": "board-meeting",
+      "tags": ["formal"],
+      "status": "approved"
+    },
+    {
+      "mappingId": "internal-project-update",
+      "styleRef": "styles/team-update",
+      "businessType": "project-update",
+      "audience": "internal-team",
+      "deliveryContext": "live-presentation",
+      "tags": ["status"],
+      "status": "approved"
+    }
+  ]
+}
