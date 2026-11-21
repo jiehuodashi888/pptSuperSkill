@@ -1,0 +1,283 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { Observation, Rule } from "../runtime/src/contracts/types.js";
+import { auditRun } from "../runtime/src/orchestration/audit.js";
+import type { ModelAdapter } from "../runtime/src/orchestration/model-adapter.js";
+import {
+  observeDeck,
+  type ObservationRequest,
+  type ObservationRun,
+} from "../runtime/src/orchestration/observe.js";
+import {
+  OBSERVER_IDS,
+  type AgentTask,
+  type ObservationLevel,
+} from "../runtime/src/observers/catalog.js";
+
+const capabilities = {
+  pptxRead: true,
+  pptxWrite: false,
+  renderSlides: true,
+  imageAnalysis: true,
+  parallelAgents: false,
+};
+
+const request: ObservationRequest = {
+  companyId: "example-company",
+  level: "deck",
+  sourceIds: ["deck-001"],
+  capabilities,
+  maxConcurrency: 3,
+};
+
+class RecordingAdapter implements ModelAdapter {
+  readonly calls: AgentTask[] = [];
+
+  async run(task: AgentTask): Promise<unknown> {
+    this.calls.push(task);
+    return rawObservation(task, 0.9);
+  }
+}
+
+test("serial fallback invokes every observer once in catalog order", async () => {
+  const adapter = new RecordingAdapter();
+
+  const run = await observeDeck(request, adapter);
+
+  assert.deepEqual(
+    adapter.calls.map(({ observerId }) => observerId),
+    OBSERVER_IDS,
+  );
+  assert.equal(run.executionMode, "serial");
+  assert.deepEqual(run.results.map(({ observerId }) => observerId), OBSERVER_IDS);
+  assert.equal(run.results.every((result) => result.ok), true);
+  assert.deepEqual(auditRun(run).unresolved, []);
+});
+
+test("slide, deck, and corpus runs preserve their requested observation level", async () => {
+  for (const level of ["slide", "deck", "corpus"] as const) {
+    const adapter = new RecordingAdapter();
+    const run = await observeDeck({ ...request, level }, adapter);
+
+    assert.equal(run.level, level);
+    assert.equal(adapter.calls.length, 9);
+    assert.equal(adapter.calls.every((task) => task.input.level === level), true);
+  }
+});
+
+test("parallel capability uses bounded concurrency and deterministic result order", async () => {
+  let active = 0;
+  let peak = 0;
+  const completionOrder: string[] = [];
+  const adapter: ModelAdapter = {
+    async run(task) {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) =>
+        setTimeout(resolve, (OBSERVER_IDS.length - OBSERVER_IDS.indexOf(task.observerId)) * 2),
+      );
+      completionOrder.push(task.observerId);
+      active -= 1;
+      return rawObservation(task, 0.9);
+    },
+  };
+
+  const run = await observeDeck(
+    {
+      ...request,
+      capabilities: { ...capabilities, parallelAgents: true },
+      maxConcurrency: 3,
+    },
+    adapter,
+  );
+
+  assert.equal(run.executionMode, "parallel");
+  assert.equal(peak, 3);
+  assert.notDeepEqual(completionOrder, [...OBSERVER_IDS]);
+  assert.deepEqual(run.results.map(({ observerId }) => observerId), OBSERVER_IDS);
+});
+
+test("serial fallback never overlaps adapter calls even when concurrency is requested", async () => {
+  let active = 0;
+  let peak = 0;
+  const adapter: ModelAdapter = {
+    async run(task) {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active -= 1;
+      return rawObservation(task, 0.9);
+    },
+  };
+
+  await observeDeck({ ...request, maxConcurrency: 8 }, adapter);
+
+  assert.equal(peak, 1);
+});
+
+test("final audit reports conflicts and observer results with absent evidence", () => {
+  const first = normalizedObservation("typography", "Titles use 32pt", 0.9);
+  const conflicting = {
+    ...normalizedObservation("typography", "Titles use 28pt", 0.9),
+    observation_id: "typography-conflict",
+  };
+  const run = manualRun({
+    results: [
+      { observerId: "typography", ok: true, observations: [first, conflicting], rules: [], classifications: [] },
+      {
+        observerId: "layout",
+        ok: false,
+        observations: [],
+        rules: [],
+        classifications: [],
+        errors: ["evidence must NOT have fewer than 1 items"],
+      },
+    ],
+  });
+
+  const audit = auditRun(run);
+
+  assert.deepEqual(
+    audit.unresolved.map(({ type }) => type),
+    ["conflict", "absent-evidence"],
+  );
+});
+
+test("final audit reports low-confidence rules and candidate classifications", () => {
+  const rule: Rule = {
+    rule_id: "rule-001",
+    scope: "deck",
+    statement: "Use a compact title hierarchy",
+    observed_value: { titleSize: 28 },
+    priority: "SHOULD",
+    frequency: 0.7,
+    evidence: [evidence("deck-001")],
+    exceptions: [],
+    status: "candidate",
+  };
+  const run = manualRun({
+    results: [{
+      observerId: "style-classifier",
+      ok: true,
+      observations: [normalizedObservation("style-classifier", "Candidate style", 0.85)],
+      rules: [{ rule, confidence: 0.49 }],
+      classifications: [{
+        classificationId: "class-001",
+        taxonomy: "visual_style",
+        label: "data-led",
+        confidence: 0.88,
+        status: "candidate",
+        evidence: [evidence("deck-001")],
+      }],
+    }],
+  });
+
+  const audit = auditRun(run);
+
+  assert.deepEqual(
+    audit.unresolved.map(({ type }) => type),
+    ["low-confidence-rule", "candidate-classification"],
+  );
+});
+
+test("observer output is normalized before audit and malformed proposals are retained as failures", async () => {
+  const adapter: ModelAdapter = {
+    async run(task) {
+      if (task.observerId === "table") {
+        return { ...rawObservation(task, 0.9), evidence: [] };
+      }
+      return rawObservation(task, 0.9);
+    },
+  };
+
+  const run = await observeDeck(request, adapter);
+  const table = run.results.find(({ observerId }) => observerId === "table");
+
+  assert.equal(table?.ok, false);
+  assert.match(auditRun(run).unresolved.map(({ message }) => message).join("\n"), /table.*evidence/i);
+});
+
+test("malformed model rule proposals become audit failures instead of crashing audit", async () => {
+  const adapter: ModelAdapter = {
+    async run(task) {
+      return {
+        observations: [rawObservation(task, 0.9)],
+        rules: [{ rule: { rule_id: "incomplete" }, confidence: 0.4 }],
+      };
+    },
+  };
+
+  const run = await observeDeck(request, adapter);
+  const audit = auditRun(run);
+
+  assert.equal(run.results.every((result) => !result.ok), true);
+  assert.equal(audit.unresolved.length, 9);
+  assert.equal(audit.unresolved.every(({ type }) => type === "observer-failure"), true);
+});
+
+test("an observer envelope with no observations is unresolved absent evidence", async () => {
+  const adapter: ModelAdapter = {
+    async run() {
+      return { observations: [] };
+    },
+  };
+
+  const run = await observeDeck(request, adapter);
+  const audit = auditRun(run);
+
+  assert.equal(run.results.every((result) => !result.ok), true);
+  assert.equal(audit.unresolved.length, 9);
+  assert.equal(audit.unresolved.every(({ type }) => type === "absent-evidence"), true);
+});
+
+function rawObservation(
+  task: AgentTask,
+  confidence: number,
+): Record<string, unknown> {
+  return {
+    observation_id: `obs-${task.observerId}`,
+    category: task.observerId,
+    fact: `${task.observerId} fact`,
+    evidence: [evidence(task.input.sourceIds[0]!)],
+    confidence,
+  };
+}
+
+function normalizedObservation(
+  category: (typeof OBSERVER_IDS)[number],
+  fact: string,
+  confidence: number,
+): Observation {
+  return {
+    observation_id: `obs-${category}`,
+    category,
+    fact,
+    evidence: [evidence("deck-001")],
+    confidence,
+    agent_id: category,
+    coverage: 1,
+    missing_capabilities: [],
+    unknown_fields: [],
+  };
+}
+
+function evidence(sourceId: string) {
+  return {
+    source_id: sourceId,
+    slide_number: 1,
+    element_ref: "shape-1",
+    source_type: "pptx-structure",
+    locator: `${sourceId}/slide1.xml#shape-1`,
+  };
+}
+
+function manualRun(overrides: Pick<ObservationRun, "results">): ObservationRun {
+  return {
+    companyId: "example-company",
+    level: "deck" as ObservationLevel,
+    sourceIds: ["deck-001"],
+    executionMode: "serial",
+    results: overrides.results,
+  };
+}
