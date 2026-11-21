@@ -110,12 +110,23 @@ function mappingMatches(
   mapping: ApprovedScenarioMapping,
   request: GenerationRequest,
 ): boolean {
+  const meaningfulTags = uniqueNormalized(mapping.tags ?? []);
+  const hasMeaningfulPredicate =
+    [
+      mapping.businessType,
+      mapping.audience,
+      mapping.department,
+      mapping.deliveryContext,
+    ].some((value) => normalize(value).length > 0) || meaningfulTags.length > 0;
+
+  if (!hasMeaningfulPredicate) return false;
+
   return (
     matchesRequired(mapping.businessType, request.businessType) &&
     matchesRequired(mapping.audience, request.audience) &&
     matchesRequired(mapping.department, request.department) &&
     matchesRequired(mapping.deliveryContext, request.deliveryContext) &&
-    (mapping.tags ?? []).every((tag) =>
+    meaningfulTags.every((tag) =>
       includesNormalized(request.explicitTags ?? [], tag),
     )
   );

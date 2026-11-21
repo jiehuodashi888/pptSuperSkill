@@ -134,6 +134,65 @@ test("unknown facts with too little evidence require confirmation", () => {
   assert.throws(() => requireApprovedRoute(decision), /confirmation/i);
 });
 
+test("a predicate-free approved mapping cannot route an empty request", () => {
+  const decision = routeScenario({}, {
+    styles: [library.styles[0]],
+    approvedMappings: [
+      {
+        mappingId: "empty-mapping",
+        styleRef: "styles/business-formal",
+        status: "approved",
+      },
+    ],
+  });
+
+  assert.equal(decision.requires_confirmation, true);
+  assert.deepEqual(decision.selectedStyleRefs, []);
+  assert.equal(decision.confidence, 0);
+  assert.ok(
+    !decision.candidates[0]?.evidence.includes(
+      "approved_mapping:empty-mapping",
+    ),
+  );
+  assert.throws(() => requireApprovedRoute(decision), /confirmation/i);
+});
+
+test("whitespace-only mapping predicates cannot match whitespace request facts", () => {
+  const decision = routeScenario(
+    {
+      businessType: "  ",
+      audience: "\t",
+      department: "\r\n",
+      deliveryContext: " ",
+      explicitTags: ["  ", "\t"],
+    },
+    {
+      styles: [library.styles[0]],
+      approvedMappings: [
+        {
+          mappingId: "whitespace-mapping",
+          styleRef: "styles/business-formal",
+          businessType: "  ",
+          audience: "\t",
+          department: "\r\n",
+          deliveryContext: " ",
+          tags: ["  ", "\t"],
+          status: "approved",
+        },
+      ],
+    },
+  );
+
+  assert.equal(decision.requires_confirmation, true);
+  assert.deepEqual(decision.selectedStyleRefs, []);
+  assert.equal(decision.confidence, 0);
+  assert.ok(
+    !decision.candidates[0]?.evidence.includes(
+      "approved_mapping:whitespace-mapping",
+    ),
+  );
+});
+
 test("example scenario mappings are generic and point to approved library styles", async () => {
   const mappingDocument = JSON.parse(
     await readFile(
