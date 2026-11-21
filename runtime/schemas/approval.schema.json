@@ -7,7 +7,7 @@
   "required": ["request_id", "status", "change", "evidence", "proposed_by"],
   "properties": {
     "request_id": { "type": "string", "minLength": 1 },
-    "status": { "enum": ["candidate", "approved", "rejected"] },
+    "status": { "const": "candidate" },
     "change": { "$ref": "#/$defs/change" },
     "evidence": {
       "type": "array",

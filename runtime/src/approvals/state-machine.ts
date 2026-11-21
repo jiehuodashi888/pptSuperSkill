@@ -1,6 +1,19 @@
-import type { ApprovalRequest, TaxonomyEntry } from "../contracts/taxonomy.js";
+import { readFileSync } from "node:fs";
 
-export type ApprovalState = ApprovalRequest;
+import Ajv, { type ValidateFunction } from "ajv";
+
+import {
+  isIssuedApprovalRequest,
+  type ApprovalRequest,
+  type TaxonomyChange,
+  type TaxonomyEntry,
+} from "../contracts/taxonomy.js";
+
+export type ApprovalState =
+  | ApprovalRequest
+  | (Omit<ApprovalRequest, "status"> & {
+      readonly status: "approved" | "rejected";
+    });
 
 export type ApprovalDecision =
   | { action: "approve" }
@@ -10,6 +23,18 @@ export type ApprovalDecision =
   | { action: "merge"; target_ids: string[] }
   | { action: "split"; entries: TaxonomyEntry[] }
   | { action: "deprecate" };
+
+const approvalSchema = JSON.parse(
+  readFileSync(
+    new URL("../../schemas/approval.schema.json", import.meta.url),
+    "utf8",
+  ),
+) as object;
+const validateApprovalRequest: ValidateFunction = new Ajv.default({
+  allErrors: true,
+  strict: true,
+}).compile(approvalSchema);
+const decidedRequests = new WeakSet<object>();
 
 export function applyApproval(
   state: ApprovalState,
@@ -25,31 +50,53 @@ export function applyApproval(
     throw new Error(`Cannot decide an approval request in ${state.status} state`);
   }
 
-  return {
+  if (!validateApprovalRequest(state)) {
+    const details = (validateApprovalRequest.errors ?? [])
+      .map((error) => `${error.instancePath || "/"} ${error.message ?? "is invalid"}`)
+      .join("; ");
+    throw new Error(`Invalid approval request: ${details}`);
+  }
+
+  if (!isIssuedApprovalRequest(state)) {
+    throw new Error("Approval requires an issued classification proposal");
+  }
+
+  if (decidedRequests.has(state)) {
+    throw new Error("Approval request is already decided");
+  }
+
+  decidedRequests.add(state);
+
+  return Object.freeze({
     ...state,
     status: decision.action === "approve" ? "approved" : "rejected",
     change: cloneChange(state.change),
-    evidence: state.evidence.map((item) => ({ ...item })),
-  };
+    evidence: Object.freeze(
+      state.evidence.map((item) => Object.freeze({ ...item })),
+    ),
+  });
 }
 
-function cloneChange(change: ApprovalRequest["change"]): ApprovalRequest["change"] {
+function cloneChange(change: TaxonomyChange): TaxonomyChange {
   switch (change.action) {
     case "publish":
-      return { ...change, candidate: cloneEntry(change.candidate) };
+      return Object.freeze({ ...change, candidate: cloneEntry(change.candidate) });
     case "merge":
-      return {
+      return Object.freeze({
         ...change,
-        source_ids: [...change.source_ids],
+        source_ids: Object.freeze([...change.source_ids]),
         result: cloneEntry(change.result),
-      };
+      });
     case "split":
-      return { ...change, entries: change.entries.map(cloneEntry) };
+      return Object.freeze({
+        ...change,
+        entries: Object.freeze(change.entries.map(cloneEntry)),
+      });
     default:
-      return { ...change };
+      return Object.freeze({ ...change });
   }
 }
 
 function cloneEntry(entry: TaxonomyEntry): TaxonomyEntry {
-  return { ...entry, tags: [...entry.tags] };
+  return Object.freeze({ ...entry, tags: Object.freeze([...entry.tags]) });
 }

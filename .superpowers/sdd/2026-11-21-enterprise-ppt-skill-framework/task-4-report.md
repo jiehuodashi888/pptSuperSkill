@@ -40,3 +40,28 @@ Implemented and committed as `38c9537` (`feat: protect taxonomy and approval sta
 ## Concerns
 
 - This task defines and protects approval state; applying an approved change to a persisted taxonomy belongs to a later persistence or routing task. The approved taxonomy documents are never mutated by this API.
+
+## Fix Round 1: Approval Lifecycle and Boundary Validation
+
+### Reviewer Findings Addressed
+
+1. Approval lifecycle state is no longer caller-controlled. `ApprovalRequest` is a readonly, candidate-only branded type created by `proposeClassification`; issued requests and terminal results are deeply frozen. The state machine verifies request provenance with a private registry and consumes each issued request once, so neither the original candidate nor a terminal result can be reset and reused.
+2. `applyApproval` now compiles and enforces `approval.schema.json` before provenance or transition. Empty evidence, malformed evidence locators, and other schema-invalid candidate data cannot become approved. The schema itself now accepts only candidate requests and rejects self-asserted terminal state.
+
+### Regression RED
+
+- `npm test -- tests/taxonomy-approval.test.ts` — FAIL as expected with four regressions: terminal state was not frozen, a cloned caller-created request was approved, empty evidence was approved, and the schema accepted `status: "approved"`.
+
+### Regression GREEN and Verification
+
+- Focused: `npm test -- tests/taxonomy-approval.test.ts` — PASS, 30 passed, 0 failed, 1 Windows-only symlink test skipped. The package script includes the full test glob plus the focused path.
+- Full: `npm test` — PASS, 30 passed, 0 failed, 1 Windows-only symlink test skipped.
+- Types: `npm run typecheck` — PASS.
+- Patch hygiene: `git diff --check` — PASS.
+- The reviewer-noted possible unrelated Task 3 `ENOTEMPTY` cleanup failure did not recur; no Task 3 files were modified.
+
+### Scope Preservation
+
+- The three taxonomy dimensions and their example files are unchanged and remain independent.
+- Proposal creation still clones candidate tags and evidence, and now freezes those clones; approved taxonomy input is never accepted or mutated.
+- No Task 3 cleanup code or tests were changed.

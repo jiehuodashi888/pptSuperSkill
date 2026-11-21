@@ -43,10 +43,9 @@ test("candidate approval transitions to approved", () => {
 });
 
 test("formal taxonomy actions cannot bypass an approval request", () => {
-  const approved: ApprovalState = {
-    ...proposeClassification(proposal),
-    status: "approved",
-  };
+  const approved = applyApproval(proposeClassification(proposal), {
+    action: "approve",
+  });
   const directChanges: ApprovalDecision[] = [
     { action: "publish" },
     { action: "rename", newName: "x" },
@@ -58,6 +57,49 @@ test("formal taxonomy actions cannot bypass an approval request", () => {
   for (const change of directChanges) {
     assert.throws(() => applyApproval(approved, change), /approval request/i);
   }
+});
+
+test("an issued request is single-use and its terminal result is immutable", () => {
+  const candidate = proposeClassification(proposal);
+  const approved = applyApproval(candidate, { action: "approve" });
+
+  assert.equal(Object.isFrozen(approved), true);
+  assert.throws(() => {
+    (approved as { status: string }).status = "candidate";
+  }, /read only|readonly|assign/i);
+  assert.equal(approved.status, "approved");
+  assert.throws(
+    () => applyApproval(candidate, { action: "approve" }),
+    /already decided/i,
+  );
+});
+
+test("a caller-created candidate cannot self-assert approval provenance", () => {
+  const issued = proposeClassification(proposal);
+  const callerCreated = structuredClone(issued) as ApprovalState;
+
+  assert.throws(
+    () => applyApproval(callerCreated, { action: "approve" }),
+    /issued classification proposal/i,
+  );
+});
+
+test("approval rejects empty or malformed evidence at the state-machine boundary", () => {
+  const issued = proposeClassification(proposal);
+  const emptyEvidence = { ...issued, evidence: [] } as ApprovalState;
+  const malformedEvidence = {
+    ...issued,
+    evidence: [{ ...evidence, locator: "" }],
+  } as ApprovalState;
+
+  assert.throws(
+    () => applyApproval(emptyEvidence, { action: "approve" }),
+    /invalid approval request.*evidence/i,
+  );
+  assert.throws(
+    () => applyApproval(malformedEvidence, { action: "approve" }),
+    /invalid approval request.*locator/i,
+  );
 });
 
 test("classification proposals and additive tags leave approved taxonomy untouched", () => {
@@ -118,6 +160,13 @@ test("style profile and approval schemas accept representative contracts", async
     true,
   );
   assert.equal(validateApproval(proposeClassification(proposal)), true);
+  assert.equal(
+    validateApproval({
+      ...structuredClone(proposeClassification(proposal)),
+      status: "approved",
+    }),
+    false,
+  );
 });
 
 test("example-company taxonomies are separate and contain generic example data", async () => {

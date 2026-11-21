@@ -6,60 +6,64 @@ export type TaxonomyDimension =
   | "layout_pattern";
 
 export interface TaxonomyEntry {
-  id: string;
-  name: string;
-  tags: string[];
+  readonly id: string;
+  readonly name: string;
+  readonly tags: readonly string[];
 }
 
 export interface ApprovedTaxonomy {
-  dimension: TaxonomyDimension;
-  entries: TaxonomyEntry[];
+  readonly dimension: TaxonomyDimension;
+  readonly entries: readonly TaxonomyEntry[];
 }
 
 export interface ClassificationProposal {
-  proposal_id: string;
-  dimension: TaxonomyDimension;
-  candidate: TaxonomyEntry;
-  evidence: Evidence[];
-  proposed_by: string;
+  readonly proposal_id: string;
+  readonly dimension: TaxonomyDimension;
+  readonly candidate: TaxonomyEntry;
+  readonly evidence: readonly Evidence[];
+  readonly proposed_by: string;
 }
 
 export type TaxonomyChange =
   | {
-      action: "publish";
-      dimension: TaxonomyDimension;
-      candidate: TaxonomyEntry;
+      readonly action: "publish";
+      readonly dimension: TaxonomyDimension;
+      readonly candidate: TaxonomyEntry;
     }
   | {
-      action: "rename";
-      dimension: TaxonomyDimension;
-      entry_id: string;
-      new_name: string;
+      readonly action: "rename";
+      readonly dimension: TaxonomyDimension;
+      readonly entry_id: string;
+      readonly new_name: string;
     }
   | {
-      action: "merge";
-      dimension: TaxonomyDimension;
-      source_ids: string[];
-      result: TaxonomyEntry;
+      readonly action: "merge";
+      readonly dimension: TaxonomyDimension;
+      readonly source_ids: readonly string[];
+      readonly result: TaxonomyEntry;
     }
   | {
-      action: "split";
-      dimension: TaxonomyDimension;
-      source_id: string;
-      entries: TaxonomyEntry[];
+      readonly action: "split";
+      readonly dimension: TaxonomyDimension;
+      readonly source_id: string;
+      readonly entries: readonly TaxonomyEntry[];
     }
   | {
-      action: "deprecate";
-      dimension: TaxonomyDimension;
-      entry_id: string;
+      readonly action: "deprecate";
+      readonly dimension: TaxonomyDimension;
+      readonly entry_id: string;
     };
 
+const approvalRequestBrand: unique symbol = Symbol("approvalRequest");
+const issuedApprovalRequests = new WeakSet<object>();
+
 export interface ApprovalRequest {
-  request_id: string;
-  status: "candidate" | "approved" | "rejected";
-  change: TaxonomyChange;
-  evidence: Evidence[];
-  proposed_by: string;
+  readonly request_id: string;
+  readonly status: "candidate";
+  readonly change: TaxonomyChange;
+  readonly evidence: readonly Evidence[];
+  readonly proposed_by: string;
+  readonly [approvalRequestBrand]: true;
 }
 
 export interface StyleProfile {
@@ -77,19 +81,32 @@ export function proposeClassification(
     throw new Error("A classification proposal requires evidence");
   }
 
-  return {
+  const request: ApprovalRequest = {
     request_id: input.proposal_id,
     status: "candidate",
-    change: {
+    change: Object.freeze({
       action: "publish",
       dimension: input.dimension,
       candidate: cloneEntry(input.candidate),
-    },
-    evidence: input.evidence.map((item) => ({ ...item })),
+    }),
+    evidence: Object.freeze(
+      input.evidence.map((item) => Object.freeze({ ...item })),
+    ),
     proposed_by: input.proposed_by,
+    [approvalRequestBrand]: true,
   };
+
+  Object.freeze(request);
+  issuedApprovalRequests.add(request);
+  return request;
 }
 
 function cloneEntry(entry: TaxonomyEntry): TaxonomyEntry {
-  return { ...entry, tags: [...entry.tags] };
+  return Object.freeze({ ...entry, tags: Object.freeze([...entry.tags]) });
+}
+
+export function isIssuedApprovalRequest(
+  value: object,
+): value is ApprovalRequest {
+  return issuedApprovalRequests.has(value);
 }
