@@ -69,7 +69,10 @@ export function normalizeObservation(
     unknown_fields: uncertainty.unknown_fields === undefined ? metadata.unknown_fields : uncertainty.unknown_fields,
   };
   const validation = validateContract("observation", candidate);
-  const errors = [...categoryErrors, ...validation.errors];
+  const errors = categoryErrors;
+  for (let index = 0; index < validation.errors.length; index++) {
+    errors[errors.length] = validation.errors[index]!;
+  }
 
   if (errors.length > 0) {
     return { ok: false, ...metadata, errors };
@@ -78,8 +81,8 @@ export function normalizeObservation(
   const validated = candidate as Observation;
   metadata = {
     coverage: Math.min(metadata.coverage, validated.coverage),
-    missing_capabilities: [...new Set([...metadata.missing_capabilities, ...validated.missing_capabilities])],
-    unknown_fields: [...new Set([...metadata.unknown_fields, ...validated.unknown_fields])],
+    missing_capabilities: unionByIndex(metadata.missing_capabilities, validated.missing_capabilities),
+    unknown_fields: unionByIndex(metadata.unknown_fields, validated.unknown_fields),
   };
   const observation = { ...validated, ...metadata };
   const mergedValidation = validateContract("observation", observation);
@@ -91,6 +94,20 @@ export function normalizeObservation(
     ...metadata,
     errors: [],
   };
+}
+
+/** Inputs are bounded validated snapshots; no inherited iterator is consumed. */
+function unionByIndex<T extends string>(first: readonly T[], second: readonly T[]): T[] {
+  const union: T[] = [];
+  const seen = new Set<T>();
+  for (let index = 0; index < first.length + second.length; index++) {
+    const value = index < first.length ? first[index]! : second[index - first.length]!;
+    if (!seen.has(value)) {
+      seen.add(value);
+      union[union.length] = value;
+    }
+  }
+  return union;
 }
 
 /** Read own data descriptors once; never validate an array then consume its iterator. */
@@ -149,5 +166,5 @@ function degradationMetadata(
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !types.isProxy(value) && !Array.isArray(value);
 }

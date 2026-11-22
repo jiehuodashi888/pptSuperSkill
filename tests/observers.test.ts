@@ -550,6 +550,42 @@ test("uncertainty snapshots reject array accessors, custom prototypes, and overs
   }
 });
 
+test("uncertainty snapshots retain gaps when a later fact getter replaces the global array iterator", () => {
+  const previous = Object.getOwnPropertyDescriptor(Array.prototype, Symbol.iterator)!;
+  let iteratorCalls = 0;
+  const raw = {
+    observation_id: "prototype-iterator", category: "typography",
+    evidence: [evidence], confidence: 0.4, coverage: 0.2,
+    missing_capabilities: ["pptxRead"], unknown_fields: ["font_family"],
+    get fact() {
+      Object.defineProperty(Array.prototype, Symbol.iterator, {
+        configurable: true,
+        value() { iteratorCalls++; return { next: () => ({ done: true, value: undefined }) }; },
+      });
+      return "Partial font data";
+    },
+  };
+  let result: ReturnType<typeof normalizeObservation>;
+  try {
+    result = normalizeObservation(raw, context);
+  } finally {
+    Object.defineProperty(Array.prototype, Symbol.iterator, previous);
+  }
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.unknown_fields, ["rendered_font_appearance", "font_family"]);
+  assert.deepEqual(result.missing_capabilities, ["imageAnalysis", "pptxRead"]);
+  assert.equal(result.coverage, 0.2);
+  assert.equal(iteratorCalls, 0);
+});
+
+test("normalization returns a failure for a revoked root proxy without throwing", () => {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  const result = normalizeObservation(proxy, context);
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.length > 0, true);
+});
+
 function restoreDescriptor(
   target: object,
   key: string,
