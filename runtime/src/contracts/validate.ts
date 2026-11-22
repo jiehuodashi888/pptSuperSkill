@@ -17,6 +17,8 @@ const validators: Record<ContractName, ValidateFunction> = {
   instance: ajv.compile(loadSchema("instance.schema.json")),
   observation: ajv.compile(loadSchema("observation.schema.json")),
   rule: ajv.compile(loadSchema("rule.schema.json")),
+  "resource-catalog": ajv.compile(loadSchema("resource-catalog.schema.json")),
+  "style-manifest": ajv.compile(loadSchema("style-manifest.schema.json")),
 };
 
 function formatError(error: ErrorObject): string {
@@ -27,6 +29,25 @@ function formatError(error: ErrorObject): string {
 export function validateContract(name: ContractName, value: unknown): ValidationResult {
   const validator = validators[name];
   const ok = validator(value);
+
+  if (ok && name === "resource-catalog") {
+    const records = (value as { resources: Array<Record<string, unknown>> }).resources;
+    const identities = new Set<string>();
+    for (const record of records) {
+      const identity = [
+        record.resourceId,
+        record.scope,
+        record.companyId ?? "",
+        record.styleId ?? "",
+        record.version,
+        record.sha256,
+      ].join("\\u0000");
+      if (identities.has(identity)) {
+        return { ok: false, errors: ["/resources duplicate full resource identity"] };
+      }
+      identities.add(identity);
+    }
+  }
 
   return {
     ok,

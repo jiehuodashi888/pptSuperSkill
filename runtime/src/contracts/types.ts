@@ -52,7 +52,9 @@ export type ContractName =
   | "capability-manifest"
   | "instance"
   | "observation"
-  | "rule";
+  | "rule"
+  | "resource-catalog"
+  | "style-manifest";
 
 export interface ValidationResult {
   ok: boolean;

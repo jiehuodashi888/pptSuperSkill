@@ -7,6 +7,8 @@ export interface InstanceManifest {
   company_id: string;
   core_version: string;
   assets: string[];
+  resource_catalog?: "resources/catalog.json";
+  resource_catalog_version?: string;
   policy?: Record<string, unknown>;
 }
 

@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "style-manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["styleId", "companyId", "status", "ownedResources", "imports"],
+  "properties": {
+    "styleId": { "$ref": "#/definitions/identifier" },
+    "companyId": { "$ref": "#/definitions/identifier" },
+    "status": { "enum": ["candidate", "approved", "deprecated", "rejected"] },
+    "ownedResources": { "type": "array", "items": { "$ref": "#/definitions/resourceRef" } },
+    "imports": { "type": "array", "items": { "$ref": "#/definitions/resourceRef" } },
+    "businessTypes": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "audiences": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "departments": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "deliveryContexts": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "tokenOverridePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedTokenKeys", "forbiddenTokenKeys"],
+      "properties": {
+        "allowedTokenKeys": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "forbiddenTokenKeys": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }
+      }
+    }
+  },
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62})$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "resourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "scope", "version", "sha256"],
+      "properties": {
+        "resourceId": { "type": "string", "minLength": 1 },
+        "scope": { "enum": ["core", "company", "style", "request", "quarantine"] },
+        "companyId": { "$ref": "#/definitions/identifier" },
+        "styleId": { "$ref": "#/definitions/identifier" },
+        "version": { "$ref": "#/definitions/semver" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "scope": { "const": "core" } }, "required": ["scope"] },
+          "then": { "not": { "anyOf": [{ "properties": { "companyId": {} }, "required": ["companyId"] }, { "properties": { "styleId": {} }, "required": ["styleId"] }] } },
+          "else": { "properties": { "companyId": {} }, "required": ["companyId"] }
+        },
+        {
+          "if": { "properties": { "scope": { "const": "style" } }, "required": ["scope"] },
+          "then": { "properties": { "styleId": {} }, "required": ["styleId"] }
+        }
+      ]
+    }
+  }
+}
