@@ -6,6 +6,8 @@ Model classification output is a proposal and must have `status: "candidate"`. O
 
 Observation uncertainty is conservative. Supplied `coverage` must be finite and between zero and one; the result uses the minimum of that value and capability-derived coverage. `missing_capabilities` and `unknown_fields` are validated and unioned with capability-derived gaps. Missing optional metadata retains the capability defaults for legacy adapters. Unknown fields must be nonblank strings without control characters, at most 256 characters each and 128 entries in total. Capability lists contain only the five known capability names. Duplicate entries and malformed metadata are rejected.
 
+Uncertainty fields are captured from own data descriptors before validation. Arrays must have the ordinary array prototype, dense own string entries, and no custom properties or iterators. Accessors, proxies, custom prototypes and oversized arrays are rejected without running their getters or iterators. Validation and merging consume detached frozen copies, so the values checked are the values retained.
+
 ## Claim identity for conflicts
 
 Prefer a stable `property` on each observation, for example `font_family`, `font_size`, or `title.alignment`. Keys are lowercase identifiers (`[a-z][a-z0-9_.-]*`), at most 128 characters. Emit one value per property and target, using `fact` as its canonical value description. Distinct facts for the same category, property, and evidence target conflict; distinct properties do not. Use the same key and value wording consistently across observations. Conflicting payloads reusing an observation ID remain conflicts regardless of property.

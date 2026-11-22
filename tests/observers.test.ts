@@ -496,6 +496,60 @@ test("normalization rejects invalid or unbounded model uncertainty", () => {
   }
 });
 
+test("normalization rejects uncertainty iterators without invoking or draining them", () => {
+  const raw = { observation_id: "iterator", category: "typography", fact: "Partial font data", evidence: [evidence], confidence: 0.4 };
+  for (const field of ["unknown_fields", "missing_capabilities"] as const) {
+    for (const mode of ["erase", "unbounded"] as const) {
+      let iteratorCalls = 0;
+      const values = [field === "unknown_fields" ? "font_family" : "pptxRead"];
+      Object.defineProperty(values, Symbol.iterator, {
+        value() {
+          iteratorCalls++;
+          if (mode === "unbounded") throw new Error("An unbounded iterator must never start");
+          return [][Symbol.iterator]();
+        },
+      });
+      const result = normalizeObservation({ ...raw, [field]: values }, context);
+      assert.equal(result.ok, false, `${field}: ${mode}`);
+      assert.equal(iteratorCalls, 0);
+    }
+  }
+});
+
+test("normalization rejects changing uncertainty getters without reading them", () => {
+  const raw = { observation_id: "getter", category: "typography", fact: "Partial font data", evidence: [evidence], confidence: 0.4 };
+  for (const field of ["coverage", "unknown_fields", "missing_capabilities"] as const) {
+    let reads = 0;
+    const payload = { ...raw };
+    Object.defineProperty(payload, field, {
+      get() { reads++; return field === "coverage" ? (reads === 1 ? 0.2 : 1) : []; },
+    });
+    const result = normalizeObservation(payload, { ...context, coverage: 1 });
+    assert.equal(result.ok, false, field);
+    assert.equal(reads, 0);
+  }
+});
+
+test("uncertainty snapshots reject array accessors, custom prototypes, and oversized sparse arrays", () => {
+  const raw = { observation_id: "array-data", category: "typography", fact: "Partial font data", evidence: [evidence], confidence: 0.4 };
+  let reads = 0;
+  const accessor = ["font_family"];
+  Object.defineProperty(accessor, "0", { get() { reads++; return "font_family"; } });
+  const inheritedIterator = ["font_family"];
+  Object.setPrototypeOf(inheritedIterator, Object.assign(Object.create(Array.prototype), {
+    [Symbol.iterator]() { reads++; return [][Symbol.iterator](); },
+  }));
+  const proxy = new Proxy(["font_family"], {
+    getPrototypeOf() { reads++; throw new Error("Proxy behavior must not run"); },
+    getOwnPropertyDescriptor() { reads++; throw new Error("Proxy behavior must not run"); },
+  });
+  for (const unknown_fields of [accessor, inheritedIterator, proxy, new Array(129)]) {
+    const result = normalizeObservation({ ...raw, unknown_fields }, context);
+    assert.equal(result.ok, false);
+    assert.equal(reads, 0);
+  }
+});
+
 function restoreDescriptor(
   target: object,
   key: string,

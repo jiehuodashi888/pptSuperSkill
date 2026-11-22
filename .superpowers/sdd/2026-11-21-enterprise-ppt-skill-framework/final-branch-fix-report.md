@@ -18,3 +18,10 @@ Addressed the four final whole-branch findings without changing generation, pers
 - `git diff --check` — passed; only repository LF-to-CRLF normalization notices were emitted.
 
 No external services, models or network acquisitions were used. No subagents were spawned.
+
+## Review fix round 2: uncertainty data snapshots
+
+- The model's uncertainty fields are now read once through own property descriptors before contract validation. Coverage accessors are rejected without invocation, preventing a getter from returning low coverage for one read and high coverage for another.
+- Uncertainty arrays are copied by indexed own string descriptors into detached frozen arrays. Proxies, custom prototypes, symbol keys (including iterators), extra array behavior, accessor entries and sparse entries are rejected. Length limits are checked before descriptor traversal/copying. Validation and unioning consume only the snapshot, never the original model-provided iterator.
+- Three new TDD regressions failed against the previous implementation: erasing iterators were accepted, changing coverage getters were consumed, and array entry getters were consumed. The passing regressions additionally check both uncertainty list fields, an iterator that throws if started (a safe stand-in for unbounded iteration), inherited iterator behavior, proxy traps and oversized sparse arrays. All invocation counters stay zero; normal plain arrays retain the existing successful coverage/union behavior.
+- Focused tests: **46 passed, 0 failed**. Full suite after final edits: **173 tests, 172 passed, 0 failed, 1 existing Windows file-symlink skip**. Typecheck and diff checks pass. The only diff notices are Git's existing LF-to-CRLF normalization notices.

@@ -1,3 +1,5 @@
+import { types } from "node:util";
+
 import type {
   CapabilityName,
   Observation,
@@ -43,6 +45,13 @@ export function normalizeObservation(
     };
   }
 
+  let uncertainty: Record<string, unknown>;
+  try {
+    uncertainty = snapshotUncertainty(result);
+  } catch (error) {
+    return { ok: false, ...metadata, errors: [error instanceof Error ? error.message : String(error)] };
+  }
+
   const categoryErrors =
     result.category === context.observerId
       ? []
@@ -55,9 +64,9 @@ export function normalizeObservation(
     evidence: result.evidence,
     confidence: result.confidence,
     agent_id: context.observerId,
-    coverage: result.coverage === undefined ? metadata.coverage : result.coverage,
-    missing_capabilities: result.missing_capabilities === undefined ? metadata.missing_capabilities : result.missing_capabilities,
-    unknown_fields: result.unknown_fields === undefined ? metadata.unknown_fields : result.unknown_fields,
+    coverage: uncertainty.coverage === undefined ? metadata.coverage : uncertainty.coverage,
+    missing_capabilities: uncertainty.missing_capabilities === undefined ? metadata.missing_capabilities : uncertainty.missing_capabilities,
+    unknown_fields: uncertainty.unknown_fields === undefined ? metadata.unknown_fields : uncertainty.unknown_fields,
   };
   const validation = validateContract("observation", candidate);
   const errors = [...categoryErrors, ...validation.errors];
@@ -82,6 +91,51 @@ export function normalizeObservation(
     ...metadata,
     errors: [],
   };
+}
+
+/** Read own data descriptors once; never validate an array then consume its iterator. */
+function snapshotUncertainty(result: Record<string, unknown>): Record<string, unknown> {
+  if (types.isProxy(result) || ![Object.prototype, null].includes(Object.getPrototypeOf(result))) {
+    throw new TypeError("Observer uncertainty requires plain data objects");
+  }
+  const snapshot: Record<string, unknown> = Object.create(null);
+  for (const field of ["coverage", "unknown_fields", "missing_capabilities"]) {
+    const descriptor = Object.getOwnPropertyDescriptor(result, field);
+    if (descriptor === undefined) continue;
+    if (!("value" in descriptor)) throw new TypeError(`${field} must be a data field, not an accessor`);
+    const value: unknown = descriptor.value;
+    snapshot[field] = value === undefined || field === "coverage"
+      ? value
+      : snapshotUncertaintyArray(value, field, field === "unknown_fields" ? 128 : 5);
+  }
+  return Object.freeze(snapshot);
+}
+
+function snapshotUncertaintyArray(value: unknown, field: string, maxItems: number): string[] {
+  if (types.isProxy(value) || !Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new TypeError(`${field} must be a plain data array`);
+  }
+  const length: unknown = Object.getOwnPropertyDescriptor(value, "length")?.value;
+  if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0 || length > maxItems) {
+    throw new TypeError(`${field} must have at most ${maxItems} entries`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const key of Reflect.ownKeys(descriptors)) {
+    if (key === "length") continue;
+    if (typeof key !== "string" || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= length) {
+      throw new TypeError(`${field} must not contain custom array behavior`);
+    }
+  }
+  const snapshot: string[] = [];
+  for (let index = 0; index < length; index++) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || !("value" in descriptor) || typeof descriptor.value !== "string") {
+      throw new TypeError(`${field} entries must be own string data fields`);
+    }
+    snapshot[index] = descriptor.value;
+  }
+  Object.freeze(snapshot);
+  return snapshot;
 }
 
 function degradationMetadata(
