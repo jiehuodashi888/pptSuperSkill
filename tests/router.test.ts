@@ -5,6 +5,8 @@ import test from "node:test";
 import {
   requireApprovedRoute,
   routeScenario,
+  routeProtectedScenario,
+  requireProtectedRoute,
   type GenerationRequest,
   type StyleLibrary,
 } from "../runtime/src/routing/router.js";
@@ -65,6 +67,13 @@ const annualReport: GenerationRequest = {
 };
 
 const ambiguousRequest: GenerationRequest = {};
+
+test("legacy libraries and legacy issued approvals remain test-only", () => {
+  // Runtime rejection is necessary even if an untyped caller ignores TS types.
+  assert.throws(() => routeProtectedScenario(annualReport, library as never), /authentic|registered/i);
+  const legacy = requireApprovedRoute(routeScenario(annualReport, library));
+  assert.throws(() => requireProtectedRoute(legacy as never), /authentic|protected/i);
+});
 
 test("routes a known annual report to an approved style with explainable evidence", () => {
   const decision = routeScenario(annualReport, library);

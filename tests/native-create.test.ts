@@ -6,7 +6,7 @@ import test from "node:test";
 
 import JSZip from "jszip";
 
-import { generatePresentation, type GenerationInput } from "../runtime/src/generation/adapter.js";
+import { generatePresentation, prepareGenerationResources, type GenerationInput } from "../runtime/src/generation/adapter.js";
 import { NativeCreateAdapter } from "../runtime/src/generation/native-create.js";
 import type { PagePlan } from "../runtime/src/generation/page-plan.js";
 import { requireApprovedRoute, routeScenario } from "../runtime/src/routing/router.js";
@@ -75,6 +75,12 @@ test("native generation writes an editable two-slide PPTX with approved tokens a
   assert.match(await zip.file("ppt/notesSlides/notesSlide2.xml")!.async("string"), /Source: approved report/);
   assert.equal(Object.values(zip.files).filter((entry) => !entry.dir && /^ppt\/media\//.test(entry.name)).length, 0);
   assert.deepEqual(await readdir(request.outputDirectory), ["report.pptx"]);
+});
+
+test("legacy native generation approval cannot enter protected generation preparation", async () => {
+  const request = await input();
+  await assert.rejects(() => prepareGenerationResources(request.route as never, {} as never, { companyId: "acme", styleId: "annual", purpose: "generate" }), /authentic|protected/i);
+  assert.deepEqual(await readdir(request.outputDirectory), []);
 });
 
 test("each generation starts a fresh presentation", async () => {

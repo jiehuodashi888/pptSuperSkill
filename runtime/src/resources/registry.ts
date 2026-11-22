@@ -97,7 +97,8 @@ async function loadStyleManifests(store: InstanceStore, catalog: ResourceCatalog
   const manifestRecords = catalog.resources.filter((record) => record.kind === "style-manifest");
 
   for (const record of manifestRecords) {
-    if (record.scope !== "style" || record.companyId !== store.companyId || !record.styleId || record.status !== "approved") {
+    if (record.status !== "approved") continue;
+    if (record.scope !== "style" || record.companyId !== store.companyId || !record.styleId) {
       throw new Error("Style manifest catalog records must be approved style resources owned by the current company");
     }
     if (Object.hasOwn(manifests, record.styleId)) {
