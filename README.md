@@ -52,7 +52,7 @@
 需要 Node.js **20 或更高版本**，并建议使用项目锁定的依赖版本：
 
 ```powershell
-cd 'D:\Code\AI Coding\pptSuperSkill'
+# 在克隆后的仓库根目录运行
 npm ci
 ```
 
