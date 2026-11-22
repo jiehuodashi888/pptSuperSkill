@@ -16,7 +16,7 @@ Usage:
 
 Commands:
   help    Show this help message
-  validate-instance    Validate manifest and declared asset containment/existence
+  validate-instance    Validate resource catalogs when opted in; report legacy asset containment otherwise
   fetch-public-fixture    Explicitly acquire test-only bytes with provenance
 `;
 

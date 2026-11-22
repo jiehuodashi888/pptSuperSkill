@@ -1,0 +1,13 @@
+{
+  "companyId": "example-company",
+  "mappings": [
+    {
+      "mappingId": "generic-example-report",
+      "companyId": "example-company",
+      "styleId": "default",
+      "businessType": "example-report",
+      "audience": "general",
+      "status": "approved"
+    }
+  ]
+}

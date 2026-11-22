@@ -1,0 +1,53 @@
+{
+  "catalogVersion": "1.0.0",
+  "resources": [
+    {
+      "resourceId": "default-manifest",
+      "kind": "style-manifest",
+      "scope": "style",
+      "companyId": "example-company",
+      "styleId": "default",
+      "version": "1.0.0",
+      "sha256": "6e94a11ea1ee65108a38b7867e323fbf0091ba8446878d85d7463a6abca8f42c",
+      "path": "styles/default/manifest.json",
+      "status": "approved",
+      "allowedPurposes": ["route", "generate", "qa"]
+    },
+    {
+      "resourceId": "default-tokens",
+      "kind": "token-set",
+      "scope": "style",
+      "companyId": "example-company",
+      "styleId": "default",
+      "version": "1.0.0",
+      "sha256": "a868490f99cfebcb59cc9c97e2b543beb65ac776629b9b05c28df85b0a0ad584",
+      "path": "styles/default/tokens.json",
+      "status": "approved",
+      "allowedPurposes": ["route", "generate", "qa"]
+    },
+    {
+      "resourceId": "default-layouts",
+      "kind": "layout",
+      "scope": "style",
+      "companyId": "example-company",
+      "styleId": "default",
+      "version": "1.0.0",
+      "sha256": "7da3cbb91e8d2c23323df6a712d53df8cb4a5ac96132fdc304c97447a0862de6",
+      "path": "styles/default/layouts.json",
+      "status": "approved",
+      "allowedPurposes": ["route", "generate", "qa"]
+    },
+    {
+      "resourceId": "approved-scenario-mappings",
+      "kind": "rule-set",
+      "scope": "company",
+      "companyId": "example-company",
+      "version": "1.0.0",
+      "sha256": "0a29b018eef8d1df6275f81770909eb1deaf570b6d5e8cf4eafd9f91958df273",
+      "path": "scenarios/approved-mappings.json",
+      "status": "approved",
+      "allowedPurposes": ["route"],
+      "exportPolicy": { "mode": "allow-listed", "consumerStyleIds": ["default"] }
+    }
+  ]
+}
