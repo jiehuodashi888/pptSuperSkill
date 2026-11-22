@@ -160,7 +160,7 @@ function observationConflicts(observations: readonly Observation[]): AuditFindin
       .map((item) => `${item.source_id}:${item.slide_number}:${item.element_ref}`)
       .sort()
       .join("|");
-    const key = `${observation.category}\u0000${evidenceKey}`;
+    const key = JSON.stringify([observation.category, observationProperty(observation), evidenceKey]);
     groups.set(key, [...(groups.get(key) ?? []), observation]);
   }
   const findings: AuditFinding[] = [];
@@ -174,6 +174,24 @@ function observationConflicts(observations: readonly Observation[]): AuditFindin
     }
   }
   return findings;
+}
+
+/** Explicit properties are preferred; legacy prose follows the documented grammar. */
+function observationProperty(observation: Observation): string {
+  if (observation.property !== undefined) return observation.property;
+  const fact = observation.fact.trim().toLowerCase();
+  const claim = /^(.+?)\s*(?::|=|\bis\b|\bare\b|\buses?\b)\s*(.+)$/.exec(fact);
+  if (claim) {
+    const subject = claim[1]!.trim();
+    const value = claim[2]!.trim();
+    // Legacy "Titles use 32pt" and "Titles use Arial" describe distinct properties.
+    const dimension = observation.category === "typography" && /\buses?\b/.test(claim[0]!)
+      ? (/^\d+(?:\.\d+)?\s*(?:pt|px)\b/.test(value) ? "font-size" : "font-family")
+      : "value";
+    return `inferred:${subject}:${dimension}`;
+  }
+  // Unstructured prose has no reliable shared claim identity; do not invent one.
+  return `fact:${fact}`;
 }
 
 function ruleConflicts(proposals: readonly RuleProposal[]): AuditFinding[] {
@@ -260,15 +278,12 @@ function lowConfidenceRules(proposals: readonly RuleProposal[]): AuditFinding[] 
 function candidateClassifications(
   classifications: readonly ClassificationProposal[],
 ): AuditFinding[] {
-  return classifications.flatMap((classification) =>
-    classification.status === "candidate"
-      ? [{
-          type: "candidate-classification" as const,
-          message: `Classification ${classification.classificationId} requires approval`,
-          references: [classification.classificationId],
-        }]
-      : []
-  );
+  // This boundary receives proposals, not authenticated approval records.
+  return classifications.map((classification) => ({
+    type: "candidate-classification" as const,
+    message: `Classification ${classification.classificationId} requires approval`,
+    references: [classification.classificationId],
+  }));
 }
 
 function stableJson(value: unknown): string {

@@ -464,6 +464,38 @@ test("normalization rejects an observer result in another contract category", ()
   assert.match(result.errors.join("\n"), /category/i);
 });
 
+test("normalization preserves model uncertainty and unions capability-derived gaps", () => {
+  const raw = {
+    observation_id: "partial", category: "typography", fact: "Font family is UNKNOWN",
+    evidence: [evidence], confidence: 0.4, coverage: 0.2,
+    unknown_fields: ["font_family"], missing_capabilities: ["pptxRead"],
+  };
+  for (const runtimeContext of [context, { ...context, coverage: 1, missingCapabilities: [], unknownFields: [] }]) {
+    const result = normalizeObservation(raw, runtimeContext);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.observation.coverage, 0.2);
+    assert.equal(result.observation.unknown_fields.includes("font_family"), true);
+    assert.equal(result.observation.missing_capabilities.includes("pptxRead"), true);
+    assert.equal(result.observation.unknown_fields.includes("rendered_font_appearance"), runtimeContext === context);
+  }
+  const optimistic = normalizeObservation({ ...raw, coverage: 1 }, context);
+  assert.equal(optimistic.coverage, 0.75);
+});
+
+test("normalization rejects invalid or unbounded model uncertainty", () => {
+  const raw = { observation_id: "invalid", category: "typography", fact: "Font family is UNKNOWN", evidence: [evidence], confidence: 0.4 };
+  const invalid = [
+    { coverage: -0.1 }, { coverage: 1.1 }, { coverage: NaN }, { coverage: "0.2" },
+    { missing_capabilities: ["invented"] }, { missing_capabilities: "pptxRead" },
+    { unknown_fields: [""] }, { unknown_fields: ["   "] }, { unknown_fields: [42] },
+    { unknown_fields: ["x".repeat(257)] }, { unknown_fields: Array.from({ length: 129 }, (_, i) => `field-${i}`) },
+  ];
+  for (const metadata of invalid) {
+    assert.equal(normalizeObservation({ ...raw, ...metadata }, context).ok, false, JSON.stringify(metadata));
+  }
+});
+
 function restoreDescriptor(
   target: object,
   key: string,

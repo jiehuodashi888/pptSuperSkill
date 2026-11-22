@@ -64,14 +64,20 @@ export function createObservationTask(
   if (!(OBSERVER_IDS as readonly string[]).includes(observerId)) {
     throw new Error(`Unknown observer: ${observerId}`);
   }
-  const isolatedInput = isolateInput(input);
-  validateTaskInput(isolatedInput);
+  const isolatedInput = snapshotObservationInput(input);
 
   return Object.freeze(Object.assign(Object.create(null) as AgentTask, {
     observerId,
     promptReference: `${PROMPT_ROOT}/${observerId}.md`,
     input: isolatedInput,
   }));
+}
+
+/** Validate and freeze one data-only input before any asynchronous work. */
+export function snapshotObservationInput(input: ObservationInput): ObservationInput {
+  const isolatedInput = isolateInput(input);
+  validateTaskInput(isolatedInput);
+  return isolatedInput;
 }
 
 function validateTaskInput(input: ObservationInput): void {

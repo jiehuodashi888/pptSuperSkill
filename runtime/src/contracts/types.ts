@@ -22,6 +22,8 @@ export interface Observation {
   observation_id: string;
   category: string;
   fact: string;
+  /** Stable claim/property identity within the category and evidence target. */
+  property?: string;
   evidence: Evidence[];
   confidence: number;
   agent_id: string;

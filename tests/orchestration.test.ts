@@ -605,6 +605,88 @@ test("raw observation shorthand cannot bypass non-array proposal validation", as
   );
 });
 
+test("model classifications cannot self-approve or bypass final approval audit", async () => {
+  const run = await observeDeck(request, {
+    async run(task) {
+      return {
+        observations: [rawObservation(task, 0.9)],
+        classifications: [{
+          classificationId: `class-${task.observerId}`, taxonomy: "visual_style",
+          label: "data-led", confidence: 0.9, status: "approved",
+          evidence: [evidence("deck-001")],
+        }],
+      };
+    },
+  });
+  assert.equal(auditRun(run).complete, false);
+  assert.equal(run.results.every((result) => !result.ok), true);
+});
+
+test("audit requires approval even for a directly supplied approved classification", () => {
+  const run = manualRun({ results: [{
+    observerId: "style-classifier", ok: true,
+    observations: [normalizedObservation("style-classifier", "Style fact", 0.9)],
+    rules: [], classifications: [{
+      classificationId: "forged", taxonomy: "visual_style", label: "data-led",
+      confidence: 0.9, status: "approved", evidence: [evidence("deck-001")],
+    }],
+  }] });
+  assert.equal(auditRun(run).complete, false);
+  assert.equal(auditRun(run).unresolved.some(({ type }) => type === "candidate-classification"), true);
+});
+
+test("in-flight caller mutation cannot relabel observation tasks or report scope", async () => {
+  const mutable = { ...request, sourceIds: ["deck-001"], capabilities: { ...capabilities } };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const calls: AgentTask[] = [];
+  const pending = observeDeck(mutable, {
+    async run(task) {
+      calls.push(task);
+      await gate;
+      return rawObservation(task, 0.9);
+    },
+  });
+  mutable.companyId = "other-company";
+  mutable.level = "corpus";
+  mutable.sourceIds[0] = "other-source";
+  mutable.capabilities.parallelAgents = true;
+  release();
+  const run = await pending;
+  assert.equal(run.companyId, "example-company");
+  assert.equal(run.level, "deck");
+  assert.deepEqual(run.sourceIds, ["deck-001"]);
+  assert.equal(run.executionMode, "serial");
+  assert.equal(calls.every(({ input }) => input.companyId === "example-company" && input.level === "deck" && input.sourceIds[0] === "deck-001"), true);
+  assert.equal(auditRun(run).complete, true);
+});
+
+test("final audit distinguishes compatible font properties on one element", () => {
+  const run = manualRun({ results: [{
+    observerId: "typography", ok: true, rules: [], classifications: [],
+    observations: [
+      { ...normalizedObservation("typography", "Font family is Arial", 0.9), observation_id: "family" },
+      { ...normalizedObservation("typography", "Font size is 32pt", 0.9), observation_id: "size" },
+    ],
+  }] });
+  assert.equal(auditRun(run).complete, true);
+});
+
+test("explicit claim properties preserve conflicts without conflating distinct claims", async () => {
+  const run = await observeDeck(request, {
+    async run(task) {
+      if (task.observerId !== "typography") return rawObservation(task, 0.9);
+      return { observations: [
+        { ...rawObservation(task, 0.9), observation_id: "family", property: "font_family", fact: "Arial" },
+        { ...rawObservation(task, 0.9), observation_id: "size", property: "font_size", fact: "32pt" },
+        { ...rawObservation(task, 0.9), observation_id: "size-conflict", property: "font_size", fact: "28pt" },
+      ] };
+    },
+  });
+  const conflicts = auditRun(run).unresolved.filter(({ type }) => type === "conflict");
+  assert.deepEqual(conflicts.map(({ references }) => references), [["size", "size-conflict"]]);
+});
+
 function rawObservation(
   task: AgentTask,
   confidence: number,

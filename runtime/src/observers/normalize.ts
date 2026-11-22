@@ -33,7 +33,7 @@ export function normalizeObservation(
   result: unknown,
   context: ObservationContext,
 ): ObservationNormalizationResult {
-  const metadata = degradationMetadata(context);
+  let metadata = degradationMetadata(context);
 
   if (!isRecord(result)) {
     return {
@@ -51,10 +51,13 @@ export function normalizeObservation(
     observation_id: result.observation_id,
     category: result.category,
     fact: result.fact,
+    ...(result.property === undefined ? {} : { property: result.property }),
     evidence: result.evidence,
     confidence: result.confidence,
     agent_id: context.observerId,
-    ...metadata,
+    coverage: result.coverage === undefined ? metadata.coverage : result.coverage,
+    missing_capabilities: result.missing_capabilities === undefined ? metadata.missing_capabilities : result.missing_capabilities,
+    unknown_fields: result.unknown_fields === undefined ? metadata.unknown_fields : result.unknown_fields,
   };
   const validation = validateContract("observation", candidate);
   const errors = [...categoryErrors, ...validation.errors];
@@ -63,9 +66,19 @@ export function normalizeObservation(
     return { ok: false, ...metadata, errors };
   }
 
+  const validated = candidate as Observation;
+  metadata = {
+    coverage: Math.min(metadata.coverage, validated.coverage),
+    missing_capabilities: [...new Set([...metadata.missing_capabilities, ...validated.missing_capabilities])],
+    unknown_fields: [...new Set([...metadata.unknown_fields, ...validated.unknown_fields])],
+  };
+  const observation = { ...validated, ...metadata };
+  const mergedValidation = validateContract("observation", observation);
+  if (!mergedValidation.ok) return { ok: false, ...metadata, errors: mergedValidation.errors };
+
   return {
     ok: true,
-    observation: candidate as Observation,
+    observation,
     ...metadata,
     errors: [],
   };

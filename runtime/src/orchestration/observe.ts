@@ -8,6 +8,7 @@ import { validateContract } from "../contracts/validate.js";
 import {
   OBSERVER_IDS,
   createObservationTask,
+  snapshotObservationInput,
   type AgentTask,
   type ObservationInput,
   type ObservationLevel,
@@ -71,24 +72,40 @@ export async function observeDeck(
   request: ObservationRequest,
   adapter: ModelAdapter,
 ): Promise<ObservationRun> {
-  validateRequestScope(request);
-  const concurrency = requestedConcurrency(request);
-  const executionMode = request.capabilities.parallelAgents
+  const snapshot = snapshotRequest(request);
+  validateRequestScope(snapshot);
+  const concurrency = requestedConcurrency(snapshot);
+  const executionMode = snapshot.capabilities.parallelAgents
     ? "parallel"
     : "serial";
-  const tasks = createTasks(request);
+  const tasks = createTasks(snapshot);
   const execute = (task: AgentTask) => executeTask(task, adapter);
   const results = executionMode === "parallel"
     ? await mapBounded(tasks, concurrency, execute)
     : await mapSerial(tasks, execute);
 
   return Object.freeze({
-    companyId: request.companyId,
-    level: request.level,
-    sourceIds: Object.freeze([...request.sourceIds]),
+    companyId: snapshot.companyId,
+    level: snapshot.level,
+    sourceIds: Object.freeze([...snapshot.sourceIds]),
     executionMode,
     results: Object.freeze(results),
   });
+}
+
+function snapshotRequest(request: ObservationRequest): ObservationRequest {
+  if (!isRecord(request) || ![Object.prototype, null].includes(Object.getPrototypeOf(request))) {
+    throw new Error("Observation request must be a plain object");
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(request);
+  for (const descriptor of Object.values(descriptors)) {
+    if (!("value" in descriptor)) throw new Error("Observation request requires data fields, not accessors");
+  }
+  const { maxConcurrency: concurrencyDescriptor, ...inputDescriptors } = descriptors;
+  const maxConcurrency = concurrencyDescriptor?.value as number | undefined;
+  const input = snapshotObservationInput(Object.defineProperties({}, inputDescriptors) as ObservationInput);
+  if (input.capabilities === undefined) throw new Error("Observation request requires capabilities");
+  return Object.freeze({ ...input, capabilities: input.capabilities, maxConcurrency });
 }
 
 function createTasks(request: ObservationRequest): AgentTask[] {
@@ -391,9 +408,9 @@ function isClassificationProposal(value: unknown): value is ClassificationPropos
     typeof value.confidence === "number" &&
     Number.isFinite(value.confidence) && value.confidence >= 0 &&
     value.confidence <= 1 &&
-    ["candidate", "approved", "deprecated", "rejected"].includes(
-      String(value.status),
-    ) && Array.isArray(value.evidence) && value.evidence.every(isEvidence);
+    // Model output is a proposal; lifecycle transitions require authenticated approval.
+    value.status === "candidate" &&
+    Array.isArray(value.evidence) && value.evidence.every(isEvidence);
 }
 
 function isEvidence(value: unknown): value is Evidence {
