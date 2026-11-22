@@ -84,6 +84,68 @@ test("resource catalog rejects invalid immutable identities and unsafe paths", (
   );
 });
 
+test("resource contracts accept numeric prereleases and reject leading-zero prerelease identifiers", () => {
+  assert.equal(
+    validateContract("resource-catalog", catalog([{ ...approvedCompanyRecord, version: "1.0.0-1" }])).ok,
+    true,
+  );
+  assert.equal(
+    validateContract("style-manifest", {
+      styleId: "annual-report",
+      companyId: "acme",
+      status: "approved",
+      ownedResources: [],
+      imports: [{
+        resourceId: "brand-baseline-v1",
+        scope: "company",
+        companyId: "acme",
+        version: "1.0.0-alpha.1",
+        sha256,
+      }],
+    }).ok,
+    true,
+  );
+  assert.equal(
+    validateContract("instance", {
+      company_id: "acme",
+      core_version: "0.1.0",
+      assets: [],
+      resource_catalog_version: "1.0.0-1",
+    }).ok,
+    true,
+  );
+
+  assert.equal(
+    validateContract("resource-catalog", catalog([{ ...approvedCompanyRecord, version: "1.0.0-01" }])).ok,
+    false,
+  );
+  assert.equal(
+    validateContract("style-manifest", {
+      styleId: "annual-report",
+      companyId: "acme",
+      status: "approved",
+      ownedResources: [],
+      imports: [{
+        resourceId: "brand-baseline-v1",
+        scope: "company",
+        companyId: "acme",
+        version: "1.0.0-alpha.01",
+        sha256,
+      }],
+    }).ok,
+    false,
+  );
+  assert.equal(
+    validateContract("instance", {
+      company_id: "acme",
+      core_version: "0.1.0",
+      assets: [],
+      resource_catalog_version: "1.0.0-alpha..beta",
+    }).ok,
+    false,
+  );
+});
+
 test("resource catalog rejects duplicate full resource identities", () => {
   assert.equal(
     validateContract("resource-catalog", catalog([approvedCompanyRecord, { ...approvedCompanyRecord }])).ok,
