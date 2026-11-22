@@ -2,6 +2,10 @@ import type { CapabilityManifest, Evidence } from "../contracts/types.js";
 import { aggregateCoverage, slideCoverageGaps, type Coverage, type PhaseStatus } from "./coverage.js";
 import type { RepairRecommendation } from "./repair.js";
 import { snapshotQaData } from "./snapshot.js";
+import { createHash } from "node:crypto";
+import { resolveResource } from "../resources/resolver.js";
+import { requireProtectedRoute, type ResolvedStyleSelection } from "../routing/router.js";
+import type { ResourceRef, ResourceRegistry } from "../resources/types.js";
 
 export type Severity = "critical" | "error" | "warning" | "info";
 
@@ -30,6 +34,7 @@ export interface AuditInput {
   readonly deckPath: string;
   readonly expectedSlideCount: number;
   readonly capabilities: CapabilityManifest;
+  readonly resourceAudit?: ProtectedResourceAudit;
   /** Inspect the actual deck's structure; page-plan validation is not deck QA. */
   readonly structural?: { inspect(deckPath: string): Promise<CheckResult> };
   readonly visual?: {
@@ -52,12 +57,46 @@ export interface AuditReport {
   readonly severityCounts: Readonly<Record<Severity, number>>;
   readonly maxSeverity: Severity | null;
   readonly coverage: Coverage;
+  readonly resourceAudit?: ProtectedResourceAudit;
+}
+
+export interface ProtectedResourceAudit {
+  readonly companyId: string;
+  readonly styleId: string;
+  readonly requestId: string;
+  readonly resourceVersionSetHash: string;
+  readonly resources: readonly ResourceRef[];
+}
+
+const protectedAudits = new WeakSet<object>();
+
+/** Resolve the selected manifest and every declared dependency for formal QA.
+ * Approval success binds provenance; it never counts as a performed QA check. */
+export async function prepareProtectedResourceAudit(registry: ResourceRegistry, selection: ResolvedStyleSelection, requestId: string): Promise<ProtectedResourceAudit> {
+  const route = requireProtectedRoute(selection, registry);
+  const manifest = registry.styleManifests[route.styleId];
+  const record = registry.companyCatalog.resources.find((entry) => entry.kind === "style-manifest" && entry.styleId === route.styleId && entry.status === "approved")!;
+  const { resourceId, scope, companyId, styleId, version, sha256 } = record;
+  const manifestRef: ResourceRef = { resourceId, scope, companyId, styleId, version, sha256 };
+  const refs = [manifestRef, ...manifest.ownedResources, ...manifest.imports];
+  const canonical = (ref: ResourceRef) => JSON.stringify([ref.scope, ref.companyId ?? "", ref.styleId ?? "", ref.resourceId, ref.version, ref.sha256]);
+  const unique = [...new Map(refs.map((ref) => [canonical(ref), ref])).entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  const handles = await Promise.all(unique.map(([, ref]) => resolveResource(registry, ref, { companyId: route.companyId, styleId: route.styleId, requestId, purpose: "qa" })));
+  const audit = Object.freeze({ companyId: route.companyId, styleId: route.styleId, requestId,
+    resourceVersionSetHash: createHash("sha256").update(JSON.stringify(unique.map(([key]) => key))).digest("hex"),
+    resources: Object.freeze(handles.map((handle) => handle.ref)),
+  });
+  protectedAudits.add(audit);
+  return audit;
 }
 
 const severities: readonly Severity[] = ["critical", "error", "warning", "info"];
 
-/** Aggregate adapter evidence; never infer a successful check from capabilities. */
+/** Low-level/test-only QA; deployments must use runProtectedWorkflow.
+ * Aggregate adapter evidence; never infer a successful check from capabilities. */
 export async function auditDeck(input: AuditInput): Promise<AuditReport> {
+  const resourceAudit = input.resourceAudit;
+  if (resourceAudit !== undefined && !protectedAudits.has(resourceAudit)) throw new Error("Authentic protected resource audit required");
   const { deckPath, expectedSlideCount } = input;
   if (typeof deckPath !== "string" || !deckPath.trim() || !Number.isSafeInteger(expectedSlideCount) || expectedSlideCount < 1) {
     throw new Error("Audit requires a deck path and a positive expected slide count");
@@ -101,6 +140,7 @@ export async function auditDeck(input: AuditInput): Promise<AuditReport> {
     structural, visual, findings, severityCounts,
     maxSeverity: severities.find((severity) => severityCounts[severity] > 0) ?? null,
     coverage,
+    ...(resourceAudit ? { resourceAudit } : {}),
   };
 }
 

@@ -69,6 +69,16 @@ export interface PreparedGenerationResources {
   readonly layouts: readonly ResolvedResource[];
 }
 
+/** Production adapters receive only a bound protected route, resource bundle and plan. */
+export interface ProtectedGenerationInput {
+  readonly selection: ResolvedStyleSelection;
+  readonly resources: PreparedGenerationResources;
+  readonly pagePlan: PagePlan;
+  readonly capabilities: CapabilityManifest;
+  readonly outputDirectory: string;
+  readonly fileName: string;
+}
+
 const generationResources = new WeakMap<object, ResolvedStyleSelection>();
 
 /** Resolves the exact registered refs under generate authorization; never accepts paths. */

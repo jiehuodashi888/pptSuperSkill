@@ -4,6 +4,8 @@ import { validateInstance } from "./instances/validate.js";
 import { fetchPublicFixtureCli } from "../../scripts/fetch-public-fixture.js";
 
 export const frameworkVersion: string = "0.1.0";
+export { runProtectedWorkflow, type ProtectedWorkflowInput, type ProtectedWorkflowReport } from "./workflow/protected.js";
+export type { RuntimeDeploymentConfig } from "./resources/types.js";
 
 const helpText = `enterprise-ppt-skill ${frameworkVersion}
 
