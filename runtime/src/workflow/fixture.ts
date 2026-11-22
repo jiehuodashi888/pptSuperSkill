@@ -76,5 +76,8 @@ function isLocalFixturePath(path: string): boolean {
   if (typeof path !== "string" || !isAbsolute(path) || /^[/\\]{2}/.test(path) || path.includes("\0")) return false;
   if (process.platform !== "win32") return true;
   if (!/^[a-z]:[/\\]/i.test(path) || /[:<>"|?*\x00-\x1f]/.test(path.slice(2))) return false;
-  return !path.slice(3).split(/[/\\]/).some((segment) => /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(segment));
+  return !path.slice(3).split(/[/\\]/).some((segment) => {
+    const normalized = segment.replace(/[ .]+$/u, "").replace(/[¹²³]/gu, (digit) => ({ "¹": "1", "²": "2", "³": "3" })[digit]!);
+    return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(normalized);
+  });
 }

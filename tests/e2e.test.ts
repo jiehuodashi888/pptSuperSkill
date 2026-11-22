@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -84,6 +84,29 @@ test("fixture paths reject network and Windows device syntax before any filesyst
   for (const fixturePath of paths) {
     await assert.rejects(runFixtureWorkflow({ ...input, instancesRoot, fixturePath }), /fixture path.*local absolute/i, fixturePath);
   }
+});
+
+test("Windows fixture paths reject normalized DOS device names before instance lookup", { skip: process.platform !== "win32" }, async (t) => {
+  const input = await options();
+  const instancesRoot = join(input.instancesRoot, "absent-local-instances");
+  for (const name of ["NUL ", "NUL.", "NUL . ", "CON... ", "PRN ", "AUX. ", "COM1 ", "LPT9. ", "COM¹", "COM².json", "COM³ ", "LPT¹.", "LPT²", "LPT³.json"]) {
+    await t.test(JSON.stringify(name), async () => {
+      await assert.rejects(runFixtureWorkflow({ ...input, instancesRoot, fixturePath: `C:\\${name}` }), /fixture path.*local absolute/i);
+    });
+  }
+});
+
+test("local fixture paths preserve ordinary spaces, Unicode and dot segments", async () => {
+  const input = await options();
+  const directory = join(input.instancesRoot, "ordinary space Ω");
+  await mkdir(directory);
+  const name = "COM¹notes space Ω..json";
+  await cp(input.fixturePath, join(directory, name));
+  // Keep the dot segments in the input instead of normalizing them with join.
+  const fixturePath = `${directory}/./../ordinary space Ω/${name}`;
+  const report = await runFixtureWorkflow({ ...input, fixturePath });
+  assert.equal(report.generatedDeck.status, "created");
+  assert.equal(report.audit.status, "incomplete");
 });
 
 test("structural errors preserve failed audit status while visual coverage remains incomplete", async () => {
