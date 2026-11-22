@@ -1,15 +1,42 @@
 import { readFile, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { isAbsolute, join, relative, sep } from "node:path";
 
 import { validateContract } from "../contracts/validate.js";
 import type { InstanceStore } from "../instances/store.js";
 import type {
   ResourceCatalog,
+  ResourceRecord,
   ResourceRef,
   ResourceRegistry,
   RuntimeDeploymentConfig,
   StyleManifest,
 } from "./types.js";
+
+const registries = new WeakSet<object>();
+
+export function isAuthenticResourceRegistry(value: unknown): value is ResourceRegistry {
+  return typeof value === "object" && value !== null && registries.has(value);
+}
+
+async function containedCorePath(root: string, path: string): Promise<string> {
+  const canonical = await realpath(join(root, path));
+  const fromRoot = relative(root, canonical);
+  if (isAbsolute(fromRoot) || fromRoot === ".." || fromRoot.startsWith(`..${sep}`)) {
+    throw new Error("Core resource escapes its canonical root");
+  }
+  return canonical;
+}
+
+/** Only records from an opened, validated registry may select filesystem paths. */
+export async function resolveRegisteredResourcePath(registry: ResourceRegistry, record: ResourceRecord): Promise<string> {
+  if (!isAuthenticResourceRegistry(registry)) throw new Error("Authentic resource registry required");
+  if (record.scope === "core") {
+    if (!registry.coreCatalog.resources.includes(record)) throw new Error("Unregistered core resource");
+    return containedCorePath(registry.coreResourcesRoot, record.path);
+  }
+  return registry.store.resolveRegisteredResource(record, registry.companyCatalog);
+}
 
 function freeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -77,10 +104,11 @@ async function loadStyleManifests(store: InstanceStore, catalog: ResourceCatalog
       throw new Error(`Multiple approved style manifest records exist for ${store.companyId}/${record.styleId}`);
     }
 
-    const manifest = requireManifest(
-      await readJson(store.resolve(record.path), `style manifest ${record.styleId}`),
-      `style manifest ${record.styleId}`,
-    );
+    const bytes = await readFile(store.resolveRegisteredResource(record, catalog));
+    if (createHash("sha256").update(bytes).digest("hex") !== record.sha256) {
+      throw new Error(`Style manifest ${record.styleId} hash mismatch`);
+    }
+    const manifest = requireManifest(JSON.parse(bytes.toString("utf8")), `style manifest ${record.styleId}`);
     if (manifest.companyId !== store.companyId || manifest.styleId !== record.styleId) {
       throw new Error(`Style manifest ${record.styleId} does not match its cataloged company/style identity`);
     }
@@ -105,7 +133,7 @@ export async function openResourceRegistry(
 
   const coreResourcesRoot = await realpath(config.coreResourcesRoot);
   const coreCatalog = requireCatalog(
-    await readJson(join(coreResourcesRoot, "core-catalog.json"), "core resource catalog"),
+    await readJson(await containedCorePath(coreResourcesRoot, "core-catalog.json"), "core resource catalog"),
     "core resource catalog",
   );
   assertCoreCatalog(coreCatalog);
@@ -114,7 +142,7 @@ export async function openResourceRegistry(
   const frozenCoreCatalog = freeze(coreCatalog);
   const styleManifests = await loadStyleManifests(store, frozenCompanyCatalog);
 
-  return Object.freeze({
+  const registry = Object.freeze({
     store,
     companyId: store.companyId,
     instanceRoot: store.root,
@@ -123,4 +151,6 @@ export async function openResourceRegistry(
     coreCatalog: frozenCoreCatalog,
     styleManifests,
   });
+  registries.add(registry);
+  return registry;
 }

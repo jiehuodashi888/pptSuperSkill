@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -173,6 +174,14 @@ test("resource registry loads frozen instance and fixed-core catalogs", async (t
   const coreRoot = join(root, "core");
   await mkdir(join(companyRoot, "styles", "annual-report"), { recursive: true });
   await mkdir(coreRoot);
+  const manifestBytes = JSON.stringify({
+    styleId: "annual-report", companyId: "acme", status: "approved",
+    ownedResources: [{
+      resourceId: "annual-template-v2", scope: "style", companyId: "acme",
+      styleId: "annual-report", version: "2.0.0", sha256,
+    }],
+    imports: [],
+  });
   await writeFile(
     join(companyRoot, "resources", "catalog.json"),
     JSON.stringify(catalog([
@@ -183,7 +192,7 @@ test("resource registry loads frozen instance and fixed-core catalogs", async (t
         companyId: "acme",
         styleId: "annual-report",
         version: "1.0.0",
-        sha256,
+        sha256: createHash("sha256").update(manifestBytes).digest("hex"),
         path: "styles/annual-report/manifest.json",
         status: "approved",
         allowedPurposes: ["route", "generate", "qa"],
@@ -193,22 +202,7 @@ test("resource registry loads frozen instance and fixed-core catalogs", async (t
   );
   await writeFile(
     join(companyRoot, "styles", "annual-report", "manifest.json"),
-    JSON.stringify({
-      styleId: "annual-report",
-      companyId: "acme",
-      status: "approved",
-      ownedResources: [
-        {
-          resourceId: "annual-template-v2",
-          scope: "style",
-          companyId: "acme",
-          styleId: "annual-report",
-          version: "2.0.0",
-          sha256,
-        },
-      ],
-      imports: [],
-    }),
+    manifestBytes,
   );
   await writeFile(join(coreRoot, "core-catalog.json"), JSON.stringify(catalog([])));
 
@@ -232,6 +226,10 @@ test("resource registry rejects a style manifest importing another company resou
   const coreRoot = join(root, "core");
   await mkdir(join(companyRoot, "styles", "annual-report"), { recursive: true });
   await mkdir(coreRoot);
+  const manifestBytes = JSON.stringify({
+    styleId: "annual-report", companyId: "acme", status: "approved", ownedResources: [],
+    imports: [{ resourceId: "foreign-brand", scope: "company", companyId: "beta", version: "1.0.0", sha256 }],
+  });
   await writeFile(
     join(companyRoot, "resources", "catalog.json"),
     JSON.stringify(catalog([{
@@ -241,7 +239,7 @@ test("resource registry rejects a style manifest importing another company resou
       companyId: "acme",
       styleId: "annual-report",
       version: "1.0.0",
-      sha256,
+      sha256: createHash("sha256").update(manifestBytes).digest("hex"),
       path: "styles/annual-report/manifest.json",
       status: "approved",
       allowedPurposes: ["route"],
@@ -249,19 +247,7 @@ test("resource registry rejects a style manifest importing another company resou
   );
   await writeFile(
     join(companyRoot, "styles", "annual-report", "manifest.json"),
-    JSON.stringify({
-      styleId: "annual-report",
-      companyId: "acme",
-      status: "approved",
-      ownedResources: [],
-      imports: [{
-        resourceId: "foreign-brand",
-        scope: "company",
-        companyId: "beta",
-        version: "1.0.0",
-        sha256,
-      }],
-    }),
+    manifestBytes,
   );
   await writeFile(join(coreRoot, "core-catalog.json"), JSON.stringify(catalog([])));
 

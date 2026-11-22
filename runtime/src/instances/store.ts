@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import type { ResourceCatalog, ResourceRecord } from "../resources/types.js";
 
 import {
   loadInstanceManifest,
@@ -31,6 +32,14 @@ export class InstanceStore {
     readonly root: string,
     readonly manifest: InstanceManifest,
   ) {}
+
+  /** The resource resolver passes only an exact record from its validated catalog. */
+  resolveRegisteredResource(record: ResourceRecord, catalog: ResourceCatalog): string {
+    if (!catalog.resources.includes(record) || record.scope === "core" || record.companyId !== this.companyId) {
+      throw new Error("Resource is not registered in this company catalog");
+    }
+    return this.resolve(record.path);
+  }
 
   resolve(assetRef: InstanceAssetRef): string {
     if (typeof assetRef !== "string" || assetRef.length === 0) {
