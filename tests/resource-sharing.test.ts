@@ -219,3 +219,22 @@ test("request replacement during decision reads cannot approve a widened purpose
   };
   await assert.rejects(validateApprovedResourceShare(f.registry, "share-001"), /match|changed/i);
 });
+
+test("import matching and approval validation bind the same request snapshot", async (t) => {
+  const f = await fixture(t);
+  await f.approve();
+  const unapprovedSource = { ...source, version: "9.0.0" };
+  await writeFile(f.requestPath, JSON.stringify({ ...f.request, source: unapprovedSource }));
+  const resolve = f.store.resolve.bind(f.store);
+  let requestReads = 0;
+  // The first snapshot matches v9; restore approved v1 before the next read.
+  f.store.resolve = (ref) => {
+    if (ref === "approvals/requests/share-001.json" && ++requestReads === 2) {
+      writeFileSync(f.requestPath, JSON.stringify(f.request));
+    }
+    return resolve(ref);
+  };
+  await assert.rejects(validateStyleImportChange(f.registry, {
+    ...f.manifests[1], imports: [unapprovedSource, source],
+  }, ["share-001"]), /match|changed|registered/i);
+});

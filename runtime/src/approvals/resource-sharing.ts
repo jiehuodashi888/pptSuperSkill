@@ -6,7 +6,7 @@ import Ajv from "ajv";
 import { validateContract } from "../contracts/validate.js";
 import { isAuthenticResourceRegistry, openResourceRegistry, resolveRegisteredResourcePath } from "../resources/registry.js";
 import type { ResourcePurpose, ResourceRecord, ResourceRef, ResourceRegistry, StyleManifest } from "../resources/types.js";
-import { readApprovalDecision, readCanonicalApprovalRequest } from "./files.js";
+import { readApprovalDecision, readCanonicalApprovalRequest, type CanonicalApprovalRequest } from "./files.js";
 
 export interface ResourceShareRequest {
   readonly type: "resource-share";
@@ -113,10 +113,10 @@ async function liveRegistry(registry: ResourceRegistry): Promise<ResourceRegistr
   return openResourceRegistry(registry.store, { coreResourcesRoot: registry.coreResourcesRoot });
 }
 
-async function validateShare(registry: ResourceRegistry, requestId: string, proposedImport?: StyleManifest): Promise<ResourceShareRequest> {
-  const request = await readCanonicalApprovalRequest(registry.store, requestId);
+async function validateShare(registry: ResourceRegistry, request: CanonicalApprovalRequest, proposedImport?: StyleManifest): Promise<ResourceShareRequest> {
   if (!isResourceShareRequest(request)) throw new Error("A company resource share approval is required");
-  const decision = await readApprovalDecision(registry.store, requestId, request);
+  // Keep the exact snapshot used to match an import through decision validation.
+  const decision = await readApprovalDecision(registry.store, request.request_id, request);
   if (!decision || decision.decision.action !== "approve") throw new Error("Resource share must have an approved decision");
   const record = sourceRecord(registry, request);
   if (!record.exportPolicy || !sameSet(record.exportPolicy.consumerStyleIds, request.consumerStyleIds)) {
@@ -137,7 +137,8 @@ async function validateShare(registry: ResourceRegistry, requestId: string, prop
  * This returns review data, never a resolver handle or permission to publish core.
  */
 export async function validateApprovedResourceShare(registry: ResourceRegistry, requestId: string): Promise<ResourceShareRequest> {
-  return validateShare(await liveRegistry(registry), requestId);
+  const live = await liveRegistry(registry);
+  return validateShare(live, await readCanonicalApprovalRequest(live.store, requestId));
 }
 
 /** Validate imports before saving a manifest. Removals are always possible;
@@ -163,7 +164,7 @@ export async function validateStyleImportChange(registry: ResourceRegistry, mani
     for (const id of ids) {
       const request = await readCanonicalApprovalRequest(live.store, id);
       if (isResourceShareRequest(request) && matches(ref, request.source) && request.consumerStyleIds.includes(proposed.styleId)) {
-        await validateShare(live, id, proposed);
+        await validateShare(live, request, proposed);
         approved = true;
         break;
       }
