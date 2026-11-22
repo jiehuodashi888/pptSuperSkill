@@ -77,7 +77,7 @@ export async function startReviewUi(options: ReviewUiOptions): Promise<ReviewUiS
       res.writeHead(200, { "Content-Type": file.type }); res.end(file.body);
     } else if (path === "/api/approvals/pending" || path === "/api/evidence") {
       const items = await listPendingApprovals(options.store);
-      json(res, 200, { items: path.endsWith("pending") ? items : items.map(({ companyId, request }) => ({ companyId, request_id: request.request_id, evidence: request.evidence })) });
+      json(res, 200, { items: path.endsWith("pending") ? items : items.map(({ companyId, request }) => ({ companyId, request_id: request.request_id, evidence: "evidence" in request ? request.evidence : [] })) });
     } else {
       const record = await readReviewJson(options.store, path === "/api/routing" ? "review/routing.json" : "review/audit.json");
       if (record && typeof record === "object" && "companyId" in record && record.companyId !== options.store.companyId) throw new ApprovalFileError(422, "Review record belongs to another company");
