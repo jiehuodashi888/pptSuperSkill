@@ -6,7 +6,10 @@ import Ajv from "ajv";
 
 import type { ApprovalRequest } from "../contracts/taxonomy.js";
 import type { InstanceStore } from "../instances/store.js";
-import { applyApproval, type ApprovalState } from "./state-machine.js";
+import { applyApproval, applyResourceShareApproval, type ApprovalState, type ResourceShareState } from "./state-machine.js";
+import { assertResourceShareRequest, isResourceShareRequest, type ResourceShareRequest } from "./resource-sharing.js";
+
+export type CanonicalApprovalRequest = ApprovalRequest | ResourceShareRequest;
 
 /** Plain JSON decision contract shared by file clients and the optional UI.
  * Decisions do not grant in-memory approval provenance or mutate taxonomy.
@@ -21,7 +24,7 @@ export interface ApprovalDecisionFile {
 export interface PendingApproval {
   companyId: string;
   request_hash: string;
-  request: ApprovalRequest;
+  request: CanonicalApprovalRequest;
 }
 
 export class ApprovalFileError extends Error {
@@ -46,7 +49,7 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value)!;
 }
 
-function fingerprint(request: ApprovalRequest): string {
+function fingerprint(request: CanonicalApprovalRequest): string {
   return createHash("sha256").update(stableJson(request)).digest("hex");
 }
 
@@ -64,10 +67,16 @@ export async function readReviewJson(store: InstanceStore, ref: string): Promise
   }
 }
 
-async function readRequest(store: InstanceStore, id: string): Promise<ApprovalRequest> {
+export async function readCanonicalApprovalRequest(store: InstanceStore, id: string): Promise<CanonicalApprovalRequest> {
   validId(id);
   const request = await readReviewJson(store, `approvals/requests/${id}.json`);
   if (request === null) throw new ApprovalFileError(404, "Approval request not found");
+  if (isResourceShareRequest(request)) {
+    try { assertResourceShareRequest(request, store.companyId); }
+    catch { throw new ApprovalFileError(422, "Invalid canonical company resource share request"); }
+    if (request.request_id !== id) throw new ApprovalFileError(422, "Resource share request identity mismatch");
+    return request;
+  }
   if (!validateRequest(request)) throw new ApprovalFileError(422, "Invalid canonical approval request");
   const typed = request as ApprovalRequest;
   if (typed.request_id !== id || typed.evidence.some(({ source_id }) => source_id.includes(":") && source_id.split(":")[0] !== store.companyId)) {
@@ -94,13 +103,14 @@ function validateDecision(value: unknown): asserts value is ApprovalDecisionFile
   }
 }
 
-export async function readApprovalDecision(store: InstanceStore, id: string): Promise<ApprovalDecisionFile | null> {
+export async function readApprovalDecision(store: InstanceStore, id: string, expectedRequest?: CanonicalApprovalRequest): Promise<ApprovalDecisionFile | null> {
   validId(id);
   const value = await readReviewJson(store, `approvals/decisions/${id}.json`);
   if (value === null) return null;
   validateDecision(value);
-  const request = await readRequest(store, id);
-  if (value.companyId !== store.companyId || value.request_id !== id || value.request_hash !== fingerprint(request)) {
+  const request = await readCanonicalApprovalRequest(store, id);
+  if (value.companyId !== store.companyId || value.request_id !== id || value.request_hash !== fingerprint(request)
+    || (expectedRequest !== undefined && (expectedRequest.request_id !== id || value.request_hash !== fingerprint(expectedRequest)))) {
     throw new ApprovalFileError(409, "Decision does not match the current instance request");
   }
   return value;
@@ -119,7 +129,7 @@ export async function listPendingApprovals(store: InstanceStore): Promise<Pendin
   for (const name of names.sort()) {
     if (!name.endsWith(".json")) continue;
     const id = name.slice(0, -5);
-    const request = await readRequest(store, id);
+    const request = await readCanonicalApprovalRequest(store, id);
     if (!await readApprovalDecision(store, id)) items.push({ companyId: store.companyId, request_hash: fingerprint(request), request });
   }
   return items;
@@ -132,7 +142,7 @@ export async function submitApprovalDecision(store: InstanceStore, value: unknow
   catch { throw new ApprovalFileError(400, "Approval decision must be plain data"); }
   validateDecision(value);
   if (value.companyId !== store.companyId) throw new ApprovalFileError(403, "Cross-instance approval rejected");
-  const request = await readRequest(store, value.request_id);
+  const request = await readCanonicalApprovalRequest(store, value.request_id);
   if (value.request_hash !== fingerprint(request)) throw new ApprovalFileError(409, "Approval request changed; refresh before deciding");
   if (await readApprovalDecision(store, value.request_id)) throw new ApprovalFileError(409, "Approval request is already decided");
   const approvals = store.resolve("approvals");
@@ -156,11 +166,17 @@ export async function submitApprovalDecision(store: InstanceStore, value: unknow
  * existing provenance and single-use checks. Read the file through the store
  * first so company scope and the on-disk request are also checked.
  */
-export function consumeApprovalDecision(store: InstanceStore, request: ApprovalRequest, value: ApprovalDecisionFile): ApprovalState {
+export function consumeApprovalDecision(store: InstanceStore, request: ApprovalRequest, value: ApprovalDecisionFile): ApprovalState;
+export function consumeApprovalDecision(store: InstanceStore, request: ResourceShareRequest, value: ApprovalDecisionFile): ResourceShareState;
+export function consumeApprovalDecision(store: InstanceStore, request: CanonicalApprovalRequest, value: ApprovalDecisionFile): ApprovalState | ResourceShareState {
   validateDecision(value);
   if (value.companyId !== store.companyId) throw new ApprovalFileError(403, "Cross-instance approval rejected");
   if (value.request_id !== request.request_id || value.request_hash !== fingerprint(request)) {
     throw new ApprovalFileError(409, "Decision does not match the issued request");
+  }
+  if (isResourceShareRequest(request)) {
+    assertResourceShareRequest(request, store.companyId);
+    return applyResourceShareApproval(request, value.decision);
   }
   return applyApproval(request, value.decision);
 }

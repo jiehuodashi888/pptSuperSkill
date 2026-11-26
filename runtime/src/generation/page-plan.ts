@@ -1,4 +1,5 @@
-import type { ApprovedRoute } from "../routing/router.js";
+import { requireProtectedRoute, type ApprovedRoute, type ResolvedStyleSelection } from "../routing/router.js";
+import { requireGenerationResources, type PreparedGenerationResources } from "./adapter.js";
 
 const EMU_PER_INCH = 914400;
 // Supported subset: 1–56 inch slides, 1–400 pt text, and on-slide boxes
@@ -42,7 +43,7 @@ export interface PlannedSlide {
   readonly notes?: string;
 }
 
-/** Values must be resolved by the caller from its approved instance assets. */
+/** Low-level/test-only value shape. Production uses buildProtectedPagePlan. */
 export interface PagePlan {
   readonly styleRef: string;
   readonly tokens: ApprovedTokens;
@@ -111,4 +112,62 @@ function checkedMeasurement(value: number, min: number, max: number, scale: numb
 
 function isXmlText(value: string): boolean {
   return !/[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u.test(value);
+}
+
+const protectedPlans = new WeakMap<object, { selection: ResolvedStyleSelection; resources: PreparedGenerationResources }>();
+
+/** Derive all styling from authentic handles; callers supply slide content only. */
+export function buildProtectedPagePlan(
+  selection: ResolvedStyleSelection,
+  resources: PreparedGenerationResources,
+  slides: readonly PlannedSlide[],
+  tokenOverrides: Readonly<Record<string, unknown>> = {},
+): PagePlan {
+  const route = requireProtectedRoute(selection);
+  requireGenerationResources(resources, selection);
+  if (!resources.tokens.length || !resources.layouts.length) throw new Error("Protected page plan requires registered tokens and layouts");
+  const merged: Record<string, unknown> = Object.create(null);
+  const precedence = { core: 0, company: 1, style: 2, request: 3, quarantine: 4 };
+  const tokenHandles = [...resources.tokens].sort((left, right) => precedence[left.ref.scope] - precedence[right.ref.scope]);
+  for (const handle of tokenHandles) {
+    const value: unknown = JSON.parse(Buffer.from(handle.bytes).toString("utf8"));
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Registered token-set must contain an object");
+    mergeTokens(value as Record<string, unknown>, false);
+  }
+  mergeTokens(tokenOverrides, true);
+  const layouts = resources.layouts.flatMap((handle) => {
+    const value: unknown = JSON.parse(Buffer.from(handle.bytes).toString("utf8"));
+    return (Array.isArray(value) ? value : [value]) as ApprovedLayout[];
+  });
+  const plan: PagePlan = { styleRef: route.styleId, tokens: merged as unknown as ApprovedTokens, layouts, slides: structuredClone(slides) };
+  validatePagePlan(plan, { styleRefs: [route.styleId], templateRefs: [], confidence: route.confidence, evidence: [] });
+  deepFreeze(plan);
+  protectedPlans.set(plan, { selection, resources });
+  return plan;
+
+  function mergeTokens(values: Readonly<Record<string, unknown>>, requestOverride: boolean) {
+    for (const [key, value] of Object.entries(values)) {
+      if (["__proto__", "constructor", "prototype"].includes(key)) throw new Error("Invalid token key");
+      const changes = Object.hasOwn(merged, key) && merged[key] !== value;
+      if (requestOverride || changes) {
+        if (!route.tokenOverridePolicy?.allowedTokenKeys.includes(key) || route.tokenOverridePolicy.forbiddenTokenKeys.includes(key)) {
+          throw new Error(`Token override is not allowed: ${key}`);
+        }
+      }
+      merged[key] = structuredClone(value);
+    }
+  }
+}
+
+/** A copied plan or one issued for another selection/resource bundle is rejected. */
+export function validateProtectedPagePlan(plan: PagePlan, selection: ResolvedStyleSelection, resources: PreparedGenerationResources): void {
+  requireGenerationResources(resources, selection);
+  const binding = plan && protectedPlans.get(plan);
+  if (!binding || binding.selection !== selection || binding.resources !== resources) throw new Error("Authentic page plan bound to this protected route and resources required");
+}
+
+function deepFreeze(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  for (const child of Object.values(value)) deepFreeze(child);
+  Object.freeze(value);
 }

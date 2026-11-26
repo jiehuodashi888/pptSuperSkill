@@ -46,7 +46,8 @@ export interface WorkflowReport {
   readonly audit: AuditReport & { readonly complete: boolean };
 }
 
-/** Runs public contracts without promoting rules, publishing taxonomies, or fetching. */
+/** TEST-ONLY orchestration, never a deployment production entry or production acceptance report.
+ * Runs synthetic contracts without promoting rules, publishing taxonomies, or fetching. */
 export async function runFixtureWorkflow(options: FixtureWorkflowOptions): Promise<WorkflowReport> {
   const { instancesRoot, companyId, fixturePath, outputDirectory, fileName, modelAdapter } = options;
   const capabilities = detectCapabilities(options.capabilities);

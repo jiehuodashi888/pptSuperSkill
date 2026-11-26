@@ -5,6 +5,8 @@ import {
   MINIMUM_SCORE_LEAD,
   scoreStyle,
 } from "./scoring.js";
+import { requireRegisteredStyleLibrary, type ApprovedStyleLibrary, type RegisteredStyleResources } from "../resources/style-library.js";
+import type { ResourceRegistry, StyleManifest } from "../resources/types.js";
 
 export interface GenerationRequest {
   readonly businessType?: string;
@@ -36,6 +38,7 @@ export interface ApprovedScenarioMapping {
   readonly status: "approved";
 }
 
+/** Low-level/test-only library. Never accept this at a production boundary. */
 export interface StyleLibrary {
   readonly styles: readonly StyleLibraryEntry[];
   readonly approvedMappings: readonly ApprovedScenarioMapping[];
@@ -66,6 +69,7 @@ export interface ApprovedRoute {
 const issuedDecisions = new WeakSet<object>();
 const issuedApprovedRoutes = new WeakSet<object>();
 
+/** Low-level/test-only scoring entry point; use protected routing for production. */
 export function routeScenario(
   request: GenerationRequest,
   library: StyleLibrary,
@@ -154,4 +158,41 @@ function freezeRequest(request: GenerationRequest): GenerationRequest {
       ? Object.freeze([...request.explicitTags])
       : undefined,
   });
+}
+
+export interface ResolvedStyleSelection {
+  readonly companyId: string;
+  readonly styleId?: string;
+  readonly requestFacts: GenerationRequest;
+  readonly candidates: readonly RoutingCandidate[];
+  readonly confidence: number;
+  readonly requires_confirmation: boolean;
+  readonly resources: RegisteredStyleResources;
+  readonly tokenOverridePolicy?: StyleManifest["tokenOverridePolicy"];
+}
+
+const protectedSelections = new WeakMap<object, ResourceRegistry>();
+
+export function routeProtectedScenario(request: GenerationRequest, library: ApprovedStyleLibrary): ResolvedStyleSelection {
+  const registry = requireRegisteredStyleLibrary(library);
+  const decision = routeScenario(request, library);
+  const selected = library.styles.find((style) => style.ref === decision.selectedStyleRefs[0]);
+  const selection: ResolvedStyleSelection = Object.freeze({
+    companyId: library.companyId, styleId: selected?.manifest.styleId,
+    requestFacts: decision.requestFacts, candidates: decision.candidates, confidence: decision.confidence,
+    requires_confirmation: decision.requires_confirmation,
+    resources: selected?.resources ?? Object.freeze({ templates: Object.freeze([]), tokens: Object.freeze([]), layouts: Object.freeze([]) }),
+    tokenOverridePolicy: selected?.manifest.tokenOverridePolicy,
+  });
+  protectedSelections.set(selection, registry);
+  return selection;
+}
+
+/** Optional registry binding prevents reuse against a different approval snapshot. */
+export function requireProtectedRoute(selection: ResolvedStyleSelection, registry?: ResourceRegistry): ResolvedStyleSelection & { readonly styleId: string } {
+  const issuer = selection && protectedSelections.get(selection);
+  if (!issuer) throw new Error("Authentic protected route selection required");
+  if (registry !== undefined && issuer !== registry) throw new Error("Protected route belongs to another registry");
+  if (selection.requires_confirmation || !selection.styleId) throw new Error("Route requires confirmation before generation");
+  return selection as ResolvedStyleSelection & { readonly styleId: string };
 }

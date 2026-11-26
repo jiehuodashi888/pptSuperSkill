@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
+  cp,
   mkdir,
   mkdtemp,
   rm,
@@ -13,9 +15,50 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { openInstance } from "../runtime/src/instances/store.js";
+import { validateInstance } from "../runtime/src/instances/validate.js";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const instancesRoot = join(repositoryRoot, "instances");
+
+test("validate-instance CLI reports the migrated example as resource-catalog validated", () => {
+  const result = spawnSync(process.execPath, ["--import", "tsx", "runtime/src/index.ts", "validate-instance", "instances/example-company"], {
+    cwd: repositoryRoot, encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).resourceCatalog, "validated");
+});
+
+test("validate-instance CLI refuses an opted-in package with changed resource bytes", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "instance-cli-validation-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const companyRoot = join(root, "example-company");
+  await cp(join(instancesRoot, "example-company"), companyRoot, { recursive: true });
+  await writeFile(join(companyRoot, "styles/default/tokens.json"), "{}");
+  const result = spawnSync(process.execPath, ["--import", "tsx", "runtime/src/index.ts", "validate-instance", companyRoot], {
+    cwd: repositoryRoot, encoding: "utf8",
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /hash mismatch/i);
+  assert.equal(result.stdout, "");
+});
+
+test("legacy validation retains containment checks and explicitly reports legacy mode", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "legacy-validation-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const companyRoot = await writeManifest(root, "legacy");
+  // Merely placing a catalog on disk must not silently opt a legacy package in.
+  await mkdir(join(companyRoot, "resources"));
+  await writeFile(join(companyRoot, "resources/catalog.json"), "invalid catalog");
+  assert.equal((await validateInstance(companyRoot)).resourceCatalog, "legacy");
+  const result = spawnSync(process.execPath, ["--import", "tsx", "runtime/src/index.ts", "validate-instance", companyRoot], {
+    cwd: repositoryRoot, encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).resourceCatalog, "legacy");
+  assert.equal(JSON.parse(result.stdout).scope, "manifest-and-declared-asset-containment");
+  await writeManifest(root, "legacy", { company_id: "legacy", core_version: "0.1.0", assets: ["missing.json"] });
+  await assert.rejects(validateInstance(companyRoot), /ENOENT/);
+});
 
 async function writeManifest(
   root: string,

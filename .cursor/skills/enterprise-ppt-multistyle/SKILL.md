@@ -9,13 +9,13 @@ Use this local, model-independent workflow to learn presentation conventions, cr
 
 ## Select the instance and capabilities
 
-Read [instance package guidance](references/instance-package.md). Select the company explicitly and use `openInstance(root, companyId)` plus `InstanceStore.resolve` for existing assets. Do not reuse another company's evidence or resolve arbitrary cross-instance paths. Validate the package before work:
+Read [instance package guidance](references/instance-package.md). Before resource-bound observation, routing, generation, QA or sharing, read [resource isolation](references/resource-isolation.md): select the company explicitly, open its registry with `openResourceRegistry`, and use exact `ResourceRef` identities. Bare paths and `InstanceStore.resolve` are not resource authorization. Do not reuse another company's evidence. Validate the package before work:
 
 ```bash
 npm run ppt-skill -- validate-instance instances/example-company
 ```
 
-This command checks the manifest and declared asset existence/containment. It does not certify brand compliance, approve a style, or establish that illustrative example data is production-ready.
+This command validates opted-in resource catalogs or reports legacy asset containment. Legacy-only packages are not eligible for protected production. It does not certify brand compliance, approve a style, or establish that illustrative example data is production-ready.
 
 Supply verified capability probes to `detectCapabilities`: `pptxRead`, `pptxWrite`, `renderSlides`, `imageAnalysis`, `parallelAgents`. Availability is deployment-specific; the core does not discover installed applications or provide a model, renderer or visual-analysis service. Never infer capability from an adapter's name. Missing parallel agents means serial execution. Missing read/render/image capabilities must remain visible as missing capabilities, unknown fields and coverage gaps. Never describe structural inspection as visual inspection.
 
@@ -33,13 +33,15 @@ Business type, visual style and layout pattern are independent taxonomy dimensio
 
 ## Route and generate
 
-Collect business purpose, audience, department, delivery context and explicit tags. Use `routeScenario` against approved company styles and mappings; retain scored candidates and the evidence behind selection. If it requires confirmation, surface the ambiguity and resolve it through the approved instance workflow before rerouting. Do not silently invent a style or bypass `requireApprovedRoute`.
+Collect business purpose, audience, department, delivery context and explicit tags. Use `runProtectedWorkflow(input, deployment)` for production; it opens the registry, loads approved company styles, routes, resolves resources, generates and audits. Supply business facts, slide content, capability probes and only permitted token overrides; deployment roots come from trusted configuration. Do not supply bare resource paths, a caller-built library/route, final output paths or test-only reports. Surface routing ambiguity and resolve it through the approved instance workflow before rerunning.
 
-Resolve the selected approved tokens and layouts into a `PagePlan`. Pass the authentic route, capabilities, absolute local output directory and a new PPTX basename to `generatePresentation`. The bundled `NativeCreateAdapter` produces editable title/body text and optional notes. It does not implement arbitrary charts, tables, asset reconstruction, template filling or editing existing decks. Those modes require their own adapter and capabilities; an unavailable mode must fail explicitly. Output creation never overwrites an existing deck.
+The runtime derives the page plan and output/cache namespaces. Low-level `routeScenario`, `generatePresentation`, `auditDeck` and `runFixtureWorkflow` are not production entry points. The bundled `NativeCreateAdapter` produces editable title/body text and optional notes. It does not implement arbitrary charts, tables, asset reconstruction, template filling or editing existing decks. Those modes require deployment support; an unavailable mode must fail explicitly. Output creation never overwrites an existing deck.
+
+Same-company sharing requires the [company-share approval and exact export/import checks](references/resource-isolation.md#same-company-sharing). Cross-company promotion to common core is an external release process; local approvals cannot authorize it.
 
 ## Audit and repair
 
-Run `auditDeck` on the actual generated deck with the expected slide count. A structural adapter must inspect deck bytes; validating only the page plan is insufficient. Visual QA needs both rendered slides and image analysis, including full slide coverage and explicit unsupported-rule gaps. No findings does not mean a complete audit. Deliver phase statuses, severity, evidence, coverage and outstanding gaps alongside the PPTX.
+Read the audit returned by `runProtectedWorkflow` for the actual generated deck. In low-level tests, a structural adapter must inspect deck bytes; validating only the page plan is insufficient. Visual QA needs both rendered slides and image analysis, including full slide coverage and explicit unsupported-rule gaps. No findings does not mean a complete audit. Deliver phase statuses, severity, evidence, coverage and outstanding gaps alongside the PPTX.
 
 Preserve the returned `audit.status`. With no renderer/image adapter, report incomplete visual coverage and the `renderSlides`/`imageAnalysis` gaps separately. Structural error or critical findings keep the overall status `failed`, even while visual coverage is incomplete; never change that failure to `incomplete`. Without failing findings, missing coverage yields `incomplete`. Do not claim visual approval or fabricate screenshots. A check can also fail with complete coverage: `coverage.complete` is not the pass/fail result.
 

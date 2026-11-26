@@ -8,6 +8,7 @@ import test from "node:test";
 import JSZip from "jszip";
 
 import { runFixtureWorkflow, type FixtureWorkflowOptions } from "../runtime/src/workflow/fixture.js";
+import { runProtectedWorkflow, type ProtectedWorkflowInput } from "../runtime/src/workflow/protected.js";
 import { fetchPublicFixture } from "../scripts/fetch-public-fixture.js";
 
 async function options(): Promise<FixtureWorkflowOptions> {
@@ -45,6 +46,11 @@ async function options(): Promise<FixtureWorkflowOptions> {
 test("local fixture wires observations and approved routing into native generation and honest QA", async () => {
   const input = await options();
   const report = await runFixtureWorkflow(input);
+  assert.equal(report.classification, "test-only");
+  await assert.rejects(runProtectedWorkflow(report as unknown as ProtectedWorkflowInput, {
+    instancesRoot: input.instancesRoot, coreResourcesRoot: join(input.instancesRoot, "missing-core"),
+    outputRoot: input.outputDirectory, cacheRoot: join(input.instancesRoot, "cache"),
+  }), /unsupported|unexpected|test-only/i);
   assert.equal(report.generatedDeck.status, "created");
   assert.equal(report.observationRun.results.length, 9);
   assert.equal(report.observationRun.executionMode, "serial");

@@ -1,0 +1,6 @@
+# Content-addressed example resources must retain identical bytes on every host.
+/resources/catalog.json text eol=lf
+/styles/default/manifest.json text eol=lf
+/styles/default/tokens.json text eol=lf
+/styles/default/layouts.json text eol=lf
+/scenarios/approved-mappings.json text eol=lf

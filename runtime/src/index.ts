@@ -4,6 +4,8 @@ import { validateInstance } from "./instances/validate.js";
 import { fetchPublicFixtureCli } from "../../scripts/fetch-public-fixture.js";
 
 export const frameworkVersion: string = "0.1.0";
+export { runProtectedWorkflow, type ProtectedWorkflowInput, type ProtectedWorkflowReport } from "./workflow/protected.js";
+export type { RuntimeDeploymentConfig } from "./resources/types.js";
 
 const helpText = `enterprise-ppt-skill ${frameworkVersion}
 
@@ -14,7 +16,7 @@ Usage:
 
 Commands:
   help    Show this help message
-  validate-instance    Validate manifest and declared asset containment/existence
+  validate-instance    Validate resource catalogs when opted in; report legacy asset containment otherwise
   fetch-public-fixture    Explicitly acquire test-only bytes with provenance
 `;
 

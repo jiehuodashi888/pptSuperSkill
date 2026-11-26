@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "resource-share-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "status", "request_id", "companyId", "targetScope", "source", "consumerStyleIds", "purposes", "licenseNotes", "rollbackNotes", "proposed_by"],
+  "properties": {
+    "type": { "const": "resource-share" },
+    "status": { "const": "candidate" },
+    "request_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$" },
+    "companyId": { "$ref": "#/definitions/identifier" },
+    "targetScope": { "const": "company" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "scope", "companyId", "version", "sha256"],
+      "properties": {
+        "resourceId": { "type": "string", "minLength": 1 },
+        "scope": { "enum": ["company", "style"] },
+        "companyId": { "$ref": "#/definitions/identifier" },
+        "styleId": { "$ref": "#/definitions/identifier" },
+        "version": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "if": { "properties": { "scope": { "const": "style" } }, "required": ["scope"] },
+      "then": { "properties": { "styleId": {} }, "required": ["styleId"] }
+    },
+    "consumerStyleIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/definitions/identifier" } },
+    "purposes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["observe", "route", "generate", "qa", "review"] } },
+    "ownerConsent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["companyId", "styleId", "consented"],
+      "properties": {
+        "companyId": { "$ref": "#/definitions/identifier" },
+        "styleId": { "$ref": "#/definitions/identifier" },
+        "consented": { "const": true }
+      }
+    },
+    "licenseNotes": { "type": "string", "minLength": 1 },
+    "rollbackNotes": { "type": "string", "minLength": 1 },
+    "proposed_by": { "type": "string", "minLength": 1 }
+  },
+  "if": { "properties": { "source": { "type": "object", "properties": { "scope": { "const": "style" } }, "required": ["scope"] } }, "required": ["source"] },
+  "then": { "properties": { "ownerConsent": {} }, "required": ["ownerConsent"] },
+  "definitions": {
+    "identifier": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62})$" }
+  }
+}

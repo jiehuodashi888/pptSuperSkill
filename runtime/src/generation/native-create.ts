@@ -2,8 +2,8 @@ import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import { snapshotGenerationInput, validateGenerationInput, type GenerationAdapter, type GenerationInput, type GenerationResult } from "./adapter.js";
-import type { LayoutBox } from "./page-plan.js";
+import { snapshotGenerationInput, validateGenerationInput, type GenerationAdapter, type GenerationInput, type GenerationResult, type ProtectedGenerationInput } from "./adapter.js";
+import { validateProtectedPagePlan, type LayoutBox } from "./page-plan.js";
 
 // 3.x exports a CommonJS constructor although its declarations use export default.
 const PptxGenJS = createRequire(import.meta.url)("pptxgenjs") as typeof import("pptxgenjs").default;
@@ -16,7 +16,18 @@ export class NativeCreateAdapter implements GenerationAdapter {
     if (input.mode !== this.mode) throw new Error(`Native adapter does not support ${input.mode}`);
     validateGenerationInput(input);
     validateOutput(input.outputDirectory, input.fileName);
+    return this.writeDeck(input);
+  }
 
+  /** Protected production entry; never converts back into a caller-built legacy route. */
+  async generateProtected(input: ProtectedGenerationInput): Promise<GenerationResult> {
+    validateProtectedPagePlan(input.pagePlan, input.selection, input.resources);
+    if (input.capabilities.pptxWrite !== true) throw new Error("Generation requires pptxWrite capability");
+    validateOutput(input.outputDirectory, input.fileName);
+    return this.writeDeck({ pagePlan: input.pagePlan, outputDirectory: input.outputDirectory, fileName: input.fileName });
+  }
+
+  private async writeDeck(input: Pick<GenerationInput, "pagePlan" | "outputDirectory" | "fileName">): Promise<GenerationResult> {
     const plan = input.pagePlan;
     const outputDirectory = input.outputDirectory;
     const fileName = input.fileName;

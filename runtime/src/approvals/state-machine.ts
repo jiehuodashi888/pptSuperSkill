@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import Ajv, { type ValidateFunction } from "ajv";
+import { assertResourceShareRequest, isIssuedResourceShareRequest, type ResourceShareRequest } from "./resource-sharing.js";
 
 import {
   isIssuedApprovalRequest,
@@ -42,6 +43,19 @@ const validateApprovalRequest: ValidateFunction = new Ajv.default({
 }).compile(approvalSchema);
 const decidedRequests = new WeakSet<object>();
 const authenticTerminalStates = new WeakSet<object>();
+
+export type ResourceShareState = Omit<ResourceShareRequest, "status"> & { readonly status: "approved" | "rejected" };
+
+/** Local share decisions are single-use review results, never taxonomy/core publication authority. */
+export function applyResourceShareApproval(request: ResourceShareRequest, decision: ApprovalDecision): ResourceShareState {
+  if (decision.action !== "approve" && decision.action !== "reject") throw new Error("Resource sharing permits approve or reject only");
+  assertResourceShareRequest(request, request.companyId);
+  if (!isIssuedResourceShareRequest(request)) throw new Error("Resource sharing requires an issued proposal");
+  if (decidedRequests.has(request)) throw new Error("Approval request is already decided");
+  decidedRequests.add(request);
+  // Issued requests and every nested field are already frozen by the proposer.
+  return Object.freeze({ ...request, status: decision.action === "approve" ? "approved" : "rejected" });
+}
 
 export function applyApproval(
   state: ApprovalState,
