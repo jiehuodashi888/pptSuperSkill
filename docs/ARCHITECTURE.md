@@ -22,6 +22,28 @@
 
 每次运行必须选择唯一的 `company_id`。`InstanceStore` 仅解析当前实例清单中声明、且在实例根目录内的资源；路径穿越、跨实例前缀、目录链接逃逸、缺失资产和不匹配的实例 ID 都会被拒绝。缓存、输出、审批决定和证据应按公司命名空间保存。通用核心不得内嵌企业品牌色、模板、原始 PPT、分类或从企业样本提取出的事实。
 
+### 受保护资源与部署边界
+
+生产入口为 `runProtectedWorkflow(input, deployment)`，只接收企业/请求标识、业务事实、页面内容、能力声明和允许的 Token 覆盖；根目录由可信部署配置提供。注册表从当前企业 `resources/catalog.json` 和独立只读核心包 `core-catalog.json` 加载精确身份，解析器在读取资源前校验范围、状态、用途与授权关系，再校验规范路径包含性及实际字节的 SHA-256。缺失或不匹配一律拒绝；没有裸路径、旧 `StyleLibrary` 或夹具报告的生产回退。
+
+| 范围 | 当前访问规则 |
+| --- | --- |
+| `core` | 与运行时一起发布的通用资源；消费风格固定精确导入，企业实例不能重定向核心根目录。 |
+| `company` | 当前企业内使用，拥有方导出允许名单与消费者精确导入必须同时匹配。 |
+| `style` | 当前企业的拥有风格私有；同公司其他风格需双向导出/导入授权。 |
+| `request` | 预留；当前解析器拒绝所有用途。 |
+| `quarantine` | 隔离预留；当前解析器拒绝所有用途，包括观察。 |
+
+正式路由、生成与 QA 只使用已批准资源。公司内共享审批绑定精确来源身份、完整用途、消费者、许可与回滚说明；维护流程还须应用并验证导出/导入变更，重新打开注册表。批准文件本身不授予读取句柄，解析器依据当前目录声明；本地文件不认证审批人的真实身份。
+
+输出路径固定派生为 `outputRoot/companyId/styleId/requestId/`，缓存为 `cacheRoot/companyId/styleId/resourceVersionSetHash/requestId/`，拒绝链接逃逸和覆盖既有文件。`resourceProvenance` 是报告中可用于发布记录的不可变身份快照：公司、风格、请求、资源版本集哈希以及资源 ID/范围/所有者/版本/SHA-256；不含资源路径或正文。完整报告另含输出/缓存路径，不能直接作为脱敏共享日志。QA 使用相同资源身份绑定，授权成功不增加覆盖率；当前生产入口尚无注册的结构/渲染/图像分析适配器，即使能力声明为真也报告缺口。
+
+`validate-instance` 对启用 `resource_catalog` 的实例验证资源目录、依赖和字节；旧 `assets` 实例仍可进行 `legacy` 兼容检查，但缺少资源目录不能运行受保护生产生成。低层路由/生成/QA 与 `runFixtureWorkflow` 是测试或底层契约，不是替代生产入口。
+
+部署方必须以独立企业根目录和最小权限 ACL 隔离实例、输出、缓存，必要时使用独立 OS 身份，并将核心包设为只读。运行时策略及路径检查不能阻止有同等 OS 权限的恶意进程，不能替代操作系统安全边界。
+
+跨公司提升属于外部核心仓库/制品发布门禁：企业所有者、数据/法务和核心发布者审查脱敏、许可与回滚记录，发布独立通用内容的新 ID/版本/哈希。企业原文件、路径、链接或仅改名的副本不能直接进入核心包。本仓库不实现该发布门禁、自动提升发布器或三方身份验证；普通本地 `approve` 不能完成核心发布。
+
 ### 关键契约
 
 核心通过 JSON Schema 和 TypeScript 类型交换可验证的数据，而不是将自由文本视为事实。主要契约包括：
@@ -96,6 +118,18 @@ Company instance A                   │                               Company i
 ```
 
 Every run selects exactly one `company_id`. `InstanceStore` resolves only resources declared in that instance's manifest and contained by its instance root. Path traversal, foreign-instance prefixes, directory-link escapes, missing assets, and mismatched instance IDs are rejected. Caches, outputs, approval decisions, and evidence should be namespaced by company. The shared core must not embed company colors, templates, source decks, taxonomies, or facts extracted from company samples.
+
+### Protected resources and deployment boundaries
+
+Production deployments call `runProtectedWorkflow(input, deployment)` with company/request identifiers, business facts, slide content, capabilities and permitted token overrides. Trusted deployment configuration supplies the roots. The registry loads exact identities from the company's `resources/catalog.json` and the independent read-only `core-catalog.json`. Before resource reads, the resolver checks identity, scope, status, purpose and authorization, then canonical containment and SHA-256 of actual bytes. Missing or mismatched authority fails closed, with no fallback to raw paths, caller-built libraries or fixture reports.
+
+The five scopes are `core` (generic release artifacts pinned by explicit consumer imports), `company` (same-company export allow-list plus exact consumer import), `style` (private owner resources, or same-company sharing with both export and import), `request` and `quarantine`. The latter two are reserved and currently rejected for every purpose, including observation. Formal routing, generation and QA require approved resources. Company-share approvals bind exact source identity, purposes, consumers, license and rollback notes; instance maintenance must apply and validate matching declarations, then reopen the registry. The resolver trusts current declarations, not approval history. A local decision file does not authenticate a human reviewer.
+
+Outputs derive from `outputRoot/companyId/styleId/requestId/`; caches derive from `cacheRoot/companyId/styleId/resourceVersionSetHash/requestId/`. Link escapes and output overwrite are rejected. The report's immutable `resourceProvenance` contains company/style/request identifiers, the resource-version-set hash and resource IDs/scopes/owners/versions/SHA-256 values, never resource paths or bytes. Full reports still contain operational output/cache paths and must not be copied wholesale into shared logs. QA binds the same resource identities; authorization never establishes QA coverage. Production currently has no registered structural/render/image adapters and reports gaps even when capability flags are true.
+
+`validate-instance` checks catalogs, dependencies and bytes for opted-in `resource_catalog` instances. Legacy `assets` instances retain `legacy` compatibility validation but cannot generate through the protected workflow without a resource catalog. Low-level routing/generation/QA and `runFixtureWorkflow` remain test or low-level contracts, not alternate production entrypoints.
+
+Deployment must isolate company roots, outputs and caches with least-privilege ACLs, use separate OS identities where needed, and keep core resources read-only. Application policy and path checks cannot stop a malicious process with the same OS permissions. Cross-company promotion belongs to an external core repository/artifact release gate: company-owner, data/legal and core-publisher review must establish sanitization, licensing and rollback for a new independent generic ID/version/hash. Source company files, paths, links and renamed copies are not publishable core artifacts. This repository implements neither that publisher nor reviewer identity verification; local `approve` files cannot publish core resources.
 
 ### Key contracts
 

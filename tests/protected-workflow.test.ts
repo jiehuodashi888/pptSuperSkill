@@ -60,6 +60,38 @@ test("protected workflow generates only derived namespaces and records resource-
   assert.notEqual(second.cacheDirectory, report.cacheDirectory);
 });
 
+test("release provenance identifies the isolated run without resource paths or bytes", async (t) => {
+  const { deployment, input } = await fixture(t);
+  const report = await runProtectedWorkflow(input, deployment);
+  assert.ok(report.resourceProvenance, "protected release report must expose safe resource provenance");
+  const provenance = report.resourceProvenance;
+  assert.deepEqual(Object.keys(provenance).sort(), ["companyId", "requestId", "resourceVersionSetHash", "resources", "styleId"]);
+  assert.equal(provenance.companyId, "acme");
+  assert.equal(provenance.styleId, "annual");
+  assert.equal(provenance.requestId, "request-1");
+  assert.match(provenance.resourceVersionSetHash, /^[0-9a-f]{64}$/);
+  assert.equal(report.outputDirectory, join(deployment.outputRoot, "acme", "annual", "request-1"));
+  assert.equal(report.cacheDirectory, join(deployment.cacheRoot, "acme", "annual", provenance.resourceVersionSetHash, "request-1"));
+  assert.deepEqual(provenance.resources.map((ref) => ref.resourceId).sort(), ["layout", "manifest", "template", "tokens"]);
+  for (const ref of provenance.resources) {
+    assert.deepEqual(Object.keys(ref).sort(), ["companyId", "resourceId", "scope", "sha256", "styleId", "version"]);
+    assert.equal(ref.companyId, "acme");
+    assert.equal(ref.styleId, "annual");
+    assert.equal(ref.scope, "style");
+    assert.equal(ref.version, "1.0.0");
+    assert.match(ref.sha256, /^[0-9a-f]{64}$/);
+  }
+  assert.ok(Object.isFrozen(provenance));
+  assert.ok(Object.isFrozen(provenance.resources));
+});
+
+test("cross-company resource denial precedes creation of output and cache namespaces", async (t) => {
+  const { deployment, input } = await fixture(t, "company");
+  await assert.rejects(runProtectedWorkflow(input, deployment), /foreign|registered|access denied/i);
+  await assert.rejects(readdir(deployment.outputRoot), { code: "ENOENT" });
+  await assert.rejects(readdir(deployment.cacheRoot), { code: "ENOENT" });
+});
+
 test("protected workflow rejects invalid identifiers before opening the deployment", async (t) => {
   const { deployment, input } = await fixture(t);
   for (const requestId of ["", "../escape", "a/b", "a\\b", "a:stream", "CON", "nul", "a ", "a.", "a".repeat(64)]) {

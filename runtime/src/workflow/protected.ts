@@ -6,7 +6,7 @@ import { prepareGenerationResources, type GenerationResult } from "../generation
 import { NativeCreateAdapter } from "../generation/native-create.js";
 import { buildProtectedPagePlan, type PlannedSlide } from "../generation/page-plan.js";
 import { openInstance } from "../instances/store.js";
-import { auditDeck, prepareProtectedResourceAudit, type AuditReport } from "../qa/audit.js";
+import { auditDeck, prepareProtectedResourceAudit, type AuditReport, type ProtectedResourceAudit } from "../qa/audit.js";
 import { openResourceRegistry } from "../resources/registry.js";
 import { loadApprovedStyleLibrary } from "../resources/style-library.js";
 import type { RuntimeDeploymentConfig } from "../resources/types.js";
@@ -28,6 +28,8 @@ export interface ProtectedWorkflowReport {
   readonly styleId: string;
   readonly requestId: string;
   readonly resourceVersionSetHash: string;
+  /** Safe identity-only provenance for release records; no resource paths or bytes. */
+  readonly resourceProvenance: ProtectedResourceAudit;
   readonly outputDirectory: string;
   readonly cacheDirectory: string;
   readonly routing: ResolvedStyleSelection;
@@ -79,7 +81,7 @@ export async function runProtectedWorkflow(input: ProtectedWorkflowInput, deploy
   // missing checks honestly, even if capabilities are declared available.
   const audit = await auditDeck({ deckPath: generatedDeck.outputPath, expectedSlideCount: generatedDeck.slideCount, capabilities: input.capabilities, resourceAudit });
   return Object.freeze({ classification: "production", companyId: input.companyId, styleId: routing.styleId,
-    requestId: input.requestId, resourceVersionSetHash, outputDirectory, cacheDirectory, routing,
+    requestId: input.requestId, resourceVersionSetHash, resourceProvenance: resourceAudit, outputDirectory, cacheDirectory, routing,
     generatedDeck: Object.freeze({ ...generatedDeck, status: "created" }), audit,
   });
 }
