@@ -38,6 +38,10 @@ No new rationalization was observed in the self-evaluations, so no additional co
 
 The coordinator reported the following outcomes from independent GREEN evaluations of the three baseline scenarios after the guidance update. These are concise reported outcomes, not verbatim responses or implementation-agent self-evaluations.
 
+The supporting local artifact is [task-7-independent-green-transcript.md](../../../.superpowers/sdd/style-resource-isolation/task-7-independent-green-transcript.md), at the exact evaluated-worktree path `D:\Code\AI Coding\pptSuperSkill\.worktrees\style-resource-isolation\.superpowers\sdd\style-resource-isolation\task-7-independent-green-transcript.md`. It is dated 2026-11-26 and records three fresh, isolated evaluators, each given the updated skill/reference and one exact scenario with instructions not to edit files. Its numbered sections 1–3 correspond to the rows below. Despite its transcript filename, the artifact contains prompts and concise result summaries, not full verbatim agent exchanges or runtime execution traces.
+
+The implementation agent read this artifact on 2026-11-26 and confirmed it is Git-ignored; SHA-256 at inspection was `48fcebbdc50d03fcc86ab5bbe02c214b44c2ba9e6e273ddd3d6ced7878ee6005`. It is external to the tracked product tree and will not accompany a normal clone. Reviewers need access to this local artifact to inspect the supporting record. It is distinct from `task-7-green-evaluation.md`, which contains only the implementation agent's earlier self-evaluations; those are not relabeled as independent evidence.
+
 | Scenario | Independent observed outcome, as reported |
 | --- | --- |
 | Same-company cross-style template | Rejected the bare path. Required exact `ResourceRef` and `resolveResource`, with source export and target import, or same-company `proposeResourceShare`, approval and maintenance before using `runProtectedWorkflow`. |
