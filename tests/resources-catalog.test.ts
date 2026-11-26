@@ -363,6 +363,8 @@ test("resource registry rejects a style manifest importing another company resou
     company_id: "acme",
     core_version: "0.1.0",
     assets: [],
+    resource_catalog: "resources/catalog.json",
+    resource_catalog_version: "1.0.0",
   });
   const coreRoot = join(root, "core");
   await mkdir(join(companyRoot, "styles", "annual-report"), { recursive: true });

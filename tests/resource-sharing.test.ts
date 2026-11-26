@@ -28,7 +28,7 @@ async function fixture(t: test.TestContext) {
   await mkdir(join(company, "approvals/requests"), { recursive: true });
   await mkdir(join(company, "resources"));
   await mkdir(core);
-  await writeFile(join(company, "instance.yaml"), JSON.stringify({ company_id: "acme", core_version: "0.1.0", assets: [] }));
+  await writeFile(join(company, "instance.yaml"), JSON.stringify({ company_id: "acme", core_version: "0.1.0", assets: [], resource_catalog: "resources/catalog.json", resource_catalog_version: "1.0.0" }));
   await writeFile(join(core, "core-catalog.json"), JSON.stringify({ catalogVersion: "1.0.0", resources: [] }));
   await writeFile(join(company, resource.path), "brand");
   const manifests: StyleManifest[] = [

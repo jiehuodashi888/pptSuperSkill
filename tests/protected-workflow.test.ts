@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import JSZip from "jszip";
 import { runProtectedWorkflow, type ProtectedWorkflowInput } from "../runtime/src/workflow/protected.js";
 import type { ResourceRecord, ResourceRef, RuntimeDeploymentConfig } from "../runtime/src/resources/types.js";
+import { openInstance } from "../runtime/src/instances/store.js";
+import { openResourceRegistry } from "../runtime/src/resources/registry.js";
+import { validateInstance } from "../runtime/src/instances/validate.js";
 
 const hash = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
 async function fixture(t: test.TestContext, foreign?: "company" | "style", qaAllowed = true) {
@@ -16,7 +19,7 @@ async function fixture(t: test.TestContext, foreign?: "company" | "style", qaAll
   const company = join(deployment.instancesRoot, "acme");
   await mkdir(join(company, "resources"), { recursive: true });
   await mkdir(deployment.coreResourcesRoot);
-  await writeFile(join(company, "instance.yaml"), JSON.stringify({ company_id: "acme", core_version: "0.1.0", assets: [] }));
+  await writeFile(join(company, "instance.yaml"), JSON.stringify({ company_id: "acme", core_version: "0.1.0", assets: [], resource_catalog: "resources/catalog.json", resource_catalog_version: "1.0.0" }));
   await writeFile(join(deployment.coreResourcesRoot, "core-catalog.json"), JSON.stringify({ catalogVersion: "1.0.0", resources: [] }));
   const records: ResourceRecord[] = [];
   async function add(id: string, kind: ResourceRecord["kind"], content: unknown): Promise<ResourceRef> {
@@ -36,6 +39,64 @@ async function fixture(t: test.TestContext, foreign?: "company" | "style", qaAll
   const input: ProtectedWorkflowInput = { companyId: "acme", requestId: "request-1", request: { businessType: "report", audience: "board" }, slides: [{ layoutId: "opening", title: "Protected report", body: "Registered resources only" }], capabilities: { pptxRead: true, pptxWrite: true, renderSlides: false, imageAnalysis: false, parallelAgents: false } };
   return { root, deployment, input };
 }
+
+test("shipped example completes protected generation and resource-bound QA setup", async (t) => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "example-protected-workflow-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const report = await runProtectedWorkflow({
+    companyId: "example-company", requestId: "example-smoke",
+    request: { businessType: "example-report", audience: "general" },
+    slides: [{ layoutId: "title-body", title: "Example smoke test", body: "Shipped registered resources" }],
+    capabilities: { pptxRead: true, pptxWrite: true, renderSlides: false, imageAnalysis: false, parallelAgents: false },
+  }, {
+    instancesRoot: resolve("instances"), coreResourcesRoot: resolve("runtime/core-resources"),
+    outputRoot: join(root, "output"), cacheRoot: join(root, "cache"),
+  });
+  assert.equal(report.generatedDeck.status, "created");
+  assert.equal(report.styleId, "default");
+  const zip = await JSZip.loadAsync(await readFile(report.generatedDeck.outputPath));
+  assert.match(await zip.file("ppt/slides/slide1.xml")!.async("string"), /Shipped registered resources/);
+  assert.equal(report.audit.status, "incomplete");
+  assert.equal(report.audit.coverage.complete, false);
+  assert.deepEqual(report.audit.resourceAudit?.resources.map((ref) => ref.resourceId).sort(),
+    ["approved-scenario-mappings", "default-layouts", "default-manifest", "default-tokens"]);
+});
+
+for (const scenario of ["legacy", "version-without-opt-in", "declared-version-mismatch", "unsupported-company-version", "unsupported-core-version"] as const) {
+  test(`registry and production reject ${scenario} before creating output or cache`, async (t) => {
+    const { deployment, input } = await fixture(t);
+    const company = join(deployment.instancesRoot, "acme");
+    const instancePath = join(company, "instance.yaml");
+    const instance = JSON.parse(await readFile(instancePath, "utf8"));
+    if (scenario === "legacy" || scenario === "version-without-opt-in") delete instance.resource_catalog;
+    if (scenario === "legacy") delete instance.resource_catalog_version;
+    if (scenario === "declared-version-mismatch") instance.resource_catalog_version = "1.0.1";
+    if (scenario === "unsupported-company-version") instance.resource_catalog_version = "2.0.0";
+    await writeFile(instancePath, JSON.stringify(instance));
+    if (scenario.startsWith("unsupported-")) {
+      const path = scenario === "unsupported-company-version" ? join(company, "resources/catalog.json") : join(deployment.coreResourcesRoot, "core-catalog.json");
+      const catalog = JSON.parse(await readFile(path, "utf8"));
+      catalog.catalogVersion = "2.0.0";
+      await writeFile(path, JSON.stringify(catalog));
+    }
+    const expected = scenario === "legacy" || scenario === "version-without-opt-in" ? /opt.in|resource_catalog/i : /version/i;
+    await assert.rejects(openResourceRegistry(await openInstance(deployment.instancesRoot, "acme"), deployment), expected);
+    await assert.rejects(runProtectedWorkflow(input, deployment), expected);
+    await assert.rejects(readdir(deployment.outputRoot), { code: "ENOENT" });
+    await assert.rejects(readdir(deployment.cacheRoot), { code: "ENOENT" });
+    if (scenario === "legacy") assert.equal((await validateInstance(company)).resourceCatalog, "legacy");
+  });
+}
+
+test("registry accepts an opted-in supported catalog without an optional declared version", async (t) => {
+  const { deployment } = await fixture(t);
+  const path = join(deployment.instancesRoot, "acme", "instance.yaml");
+  const instance = JSON.parse(await readFile(path, "utf8"));
+  delete instance.resource_catalog_version;
+  await writeFile(path, JSON.stringify(instance));
+  const registry = await openResourceRegistry(await openInstance(deployment.instancesRoot, "acme"), deployment);
+  assert.equal(registry.companyCatalog.catalogVersion, "1.0.0");
+});
 
 test("protected workflow generates only derived namespaces and records resource-bound incomplete QA", async (t) => {
   const { deployment, input } = await fixture(t);

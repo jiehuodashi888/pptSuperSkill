@@ -24,10 +24,6 @@ export async function validateInstance(directory: string) {
   const registry = await openResourceRegistry(store, {
     coreResourcesRoot: fileURLToPath(new URL("../../core-resources/", import.meta.url)),
   });
-  if (store.manifest.resource_catalog_version !== undefined
-    && store.manifest.resource_catalog_version !== registry.companyCatalog.catalogVersion) {
-    throw new Error("Resource catalog version does not match the instance manifest");
-  }
   for (const record of registry.companyCatalog.resources) {
     const bytes = await readFile(await resolveRegisteredResourcePath(registry, record));
     if (createHash("sha256").update(bytes).digest("hex") !== record.sha256) {

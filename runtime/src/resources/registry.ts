@@ -59,7 +59,11 @@ function requireCatalog(value: unknown, description: string): ResourceCatalog {
   if (!validation.ok) {
     throw new Error(`Invalid ${description}: ${validation.errors.join("; ")}`);
   }
-  return value as ResourceCatalog;
+  const catalog = value as ResourceCatalog;
+  if (catalog.catalogVersion !== "1.0.0") {
+    throw new Error(`Unsupported ${description} version: ${catalog.catalogVersion}`);
+  }
+  return catalog;
 }
 
 function requireManifest(value: unknown, description: string): StyleManifest {
@@ -126,10 +130,17 @@ export async function openResourceRegistry(
   store: InstanceStore,
   config: Pick<RuntimeDeploymentConfig, "coreResourcesRoot">,
 ): Promise<ResourceRegistry> {
+  if (!store.manifest.resource_catalog) {
+    throw new Error("Resource registry requires explicit resource_catalog opt-in in the instance manifest");
+  }
   const companyCatalog = requireCatalog(
-    await readJson(store.resolve("resources/catalog.json"), "instance resource catalog"),
+    await readJson(store.resolve(store.manifest.resource_catalog), "instance resource catalog"),
     "instance resource catalog",
   );
+  if (store.manifest.resource_catalog_version !== undefined
+    && store.manifest.resource_catalog_version !== companyCatalog.catalogVersion) {
+    throw new Error("Resource catalog version does not match the instance manifest");
+  }
   assertCatalogOwnership(companyCatalog, store.companyId);
 
   const coreResourcesRoot = await realpath(config.coreResourcesRoot);

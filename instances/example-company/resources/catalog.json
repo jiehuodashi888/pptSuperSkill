@@ -46,7 +46,7 @@
       "sha256": "0a29b018eef8d1df6275f81770909eb1deaf570b6d5e8cf4eafd9f91958df273",
       "path": "scenarios/approved-mappings.json",
       "status": "approved",
-      "allowedPurposes": ["route"],
+      "allowedPurposes": ["route", "qa"],
       "exportPolicy": { "mode": "allow-listed", "consumerStyleIds": ["default"] }
     }
   ]

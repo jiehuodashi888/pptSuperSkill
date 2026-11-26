@@ -35,7 +35,7 @@ async function fixture(t: test.TestContext, resource: ResourceRecord = record, m
   const coreRoot = join(root, "core");
   await mkdir(join(companyRoot, "resources"), { recursive: true });
   await mkdir(coreRoot);
-  await writeFile(join(companyRoot, "instance.yaml"), JSON.stringify({ company_id: "acme", core_version: "0.1.0", assets: [] }));
+  await writeFile(join(companyRoot, "instance.yaml"), JSON.stringify({ company_id: "acme", core_version: "0.1.0", assets: [], resource_catalog: "resources/catalog.json", resource_catalog_version: "1.0.0" }));
   const manifestRecords: ResourceRecord[] = [];
   for (const entry of manifests) {
     const bytes = JSON.stringify(entry);
